@@ -1,6 +1,4 @@
 gpu_mem=16
-uart_2ndstage=1
-start_debug=1
 arm_64bit=1
 kernel=Image
 
@@ -19,7 +17,7 @@ dtoverlay=i2c-rtc,ds3231
 # Disable BT to use better UART
 dtoverlay=disable-bt
 
-# Use normal DWC USB driver so threadirqs option won't
+# Use the mainline DWC2 USB driver so threadirqs option won't
 # hang the kernel
 dtoverlay=dwc2
 
