@@ -1,3 +1,6 @@
 [submodule "linux-rpi"]
 	path = linux-rpi
 	url = https://github.com/raspberrypi/linux.git
+[submodule "chrony"]
+	path = chrony
+	url = https://git.tuxfamily.org/chrony/chrony.git
