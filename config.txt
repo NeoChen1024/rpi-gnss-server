@@ -1,6 +1,6 @@
 gpu_mem=16
 arm_64bit=1
-kernel=Image
+#kernel=Image
 
 dtparam=i2c=on,spi=on
 enable_uart=1
@@ -16,10 +16,6 @@ dtoverlay=i2c-rtc,ds3231
 
 # Disable BT to use better UART
 dtoverlay=disable-bt
-
-# Use the mainline DWC2 USB driver so threadirqs option won't
-# hang the kernel
-dtoverlay=dwc2
 
 # PPS GPIO
 dtoverlay=pps-gpio,gpiopin=18

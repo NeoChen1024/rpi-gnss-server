@@ -1,1 +1,1 @@
-root=/dev/mmcblk0p2 rw rootwait console=tty1 fsck.repair=yes threadirqs
+root=/dev/mmcblk0p2 rw rootwait console=tty1 fsck.repair=yes
