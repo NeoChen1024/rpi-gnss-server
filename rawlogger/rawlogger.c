@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <endian.h>
+#include <sys/stat.h>
+#include <assert.h>
+#include <errno.h>
 
 #define UBX_SYNC1	0xB5
 #define UBX_SYNC2	0x62
@@ -122,7 +125,6 @@ int main(int argc, char *argv[])
 		if((bcnt = fread(pvt_buf, 1, PVT_SIZE, stdin)) != PVT_SIZE)
 		{
 			/* If unable to read in, bailout */
-			fwrite(pvt_buf, 1, bcnt, stdout);
 			fprintf(stderr, "Unable to read PVT message!\n");
 			continue; // go back to read the next char
 		}
@@ -130,8 +132,6 @@ int main(int argc, char *argv[])
 		if((bcnt = fread(pvt_cksum, 1, 2, stdin)) != 2)
 		{
 			/* If unable to read in, bailout */
-			fwrite(pvt_buf, 1, PVT_SIZE, stdout);
-			fwrite(pvt_cksum, 1, bcnt, stdout);
 			fprintf(stderr, "Unable to read checksum!\n");
 			continue; // go back to read the next char
 		}
@@ -152,8 +152,6 @@ int main(int argc, char *argv[])
 		if(cksum[0] != pvt_cksum[0] || cksum[1] != pvt_cksum[1])
 		{
 			/* Checksum mismatch, bailout */
-			fwrite(pvt_buf, 1, PVT_SIZE, stdout);
-			fwrite(pvt_cksum, 1, 2, stdout);
 			fprintf(stderr, "Checksum mismatch!\t");
 			fprintf(stderr, "Expected: %02X %02X\t", cksum[0], cksum[1]);
 			fprintf(stderr, "Received: %02X %02X\n", pvt_cksum[0], pvt_cksum[1]);
@@ -193,8 +191,24 @@ int main(int argc, char *argv[])
 		{
 			if(fp != NULL)
 				fclose(fp);
-			char filename[64];
-			snprintf(filename, 64, "%04hhu-%02hhu-%02hhu.ubx",
+			/* if month changed, make new directory */
+			char dirname[64];
+			if(pvt.month != last_pvt.month)
+			{
+				snprintf(dirname, 64, "%04u-%02hhu", pvt.year, pvt.month);
+				if(mkdir(dirname, 0755) != 0)
+				{
+					if(errno != EEXIST)
+					{
+						perror(dirname);
+						return 1;
+					}
+				}
+				fprintf(stderr, "Created directory %s\n", dirname);
+			}
+			char filename[128];
+			snprintf(filename, 128, "%s/%04u-%02hhu-%02hhu.ubx",
+				dirname,
 				pvt.year, pvt.month, pvt.day);
 			fp = fopen(filename, "wb");
 			if(fp == NULL)
@@ -208,11 +222,19 @@ int main(int argc, char *argv[])
 		last_pvt = pvt;
 
 		/* Write PVT to file */
-		fwrite(ubx_nav_pvt, 1, UBX_HEADER_SIZE, fp);
-		fwrite(pvt_buf, 1, PVT_SIZE, fp);
-		fwrite(pvt_cksum, 1, 2, fp);
+		uint8_t writebuf[UBX_HEADER_SIZE + PVT_SIZE + 2];
+		memcpy(writebuf, ubx_nav_pvt, UBX_HEADER_SIZE);
+		memcpy(writebuf + UBX_HEADER_SIZE, pvt_buf, PVT_SIZE);
+		memcpy(writebuf + UBX_HEADER_SIZE + PVT_SIZE, pvt_cksum, 2);
+
+		if(fwrite(writebuf, 1, UBX_HEADER_SIZE + PVT_SIZE + 2, fp) != UBX_HEADER_SIZE + PVT_SIZE + 2)
+		{
+			fprintf(stderr, "Unable to write to file!\n");
+			return 1;
+		}
 		continue; // go back to read the next char
 
+		assert(0);	// should not reach here
 	nextchar:
 		if(fp != NULL)
 			putc(c, fp);
