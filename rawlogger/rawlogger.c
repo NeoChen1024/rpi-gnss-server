@@ -207,9 +207,9 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "\nCreated directory %s\n", dirname);
 			}
 			char filename[128];
-			snprintf(filename, 128, "%s/%04u-%02hhu-%02hhu.ubx",
+			snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
 				dirname,
-				pvt.year, pvt.month, pvt.day);
+				pvt.year, pvt.month, pvt.day, pvt.hour, pvt.min, pvt.sec);
 			fp = fopen(filename, "wb");
 			if(fp == NULL)
 			{
@@ -219,9 +219,11 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "\nOpened file %s\n", filename);
 		}
 
-		/* Print current time */
-		fprintf(stderr, "%04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu\r",
-			pvt.year, pvt.month, pvt.day, pvt.hour, pvt.min, pvt.sec);
+		/* Print current status */
+		fprintf(stderr, "iTOW=%07u %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu\r",
+			pvt.iTOW,
+			pvt.year, pvt.month, pvt.day, pvt.hour, pvt.min, pvt.sec,
+			pvt.numSV);
 
 		last_pvt = pvt;
 
@@ -247,5 +249,6 @@ int main(int argc, char *argv[])
 			//putc(c, stdout);
 		}
 	}
+	fputs("\nEOF!?\n", stderr);
 	return 0;
 }
