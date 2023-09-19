@@ -204,7 +204,7 @@ int main(int argc, char *argv[])
 						return 1;
 					}
 				}
-				fprintf(stderr, "Created directory %s\n", dirname);
+				fprintf(stderr, "\nCreated directory %s\n", dirname);
 			}
 			char filename[128];
 			snprintf(filename, 128, "%s/%04u-%02hhu-%02hhu.ubx",
@@ -216,8 +216,12 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Unable to open file %s!\n", filename);
 				return 1;
 			}
-			fprintf(stderr, "Opened file %s\n", filename);
+			fprintf(stderr, "\nOpened file %s\n", filename);
 		}
+
+		/* Print current time */
+		fprintf(stderr, "%04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu\r",
+			pvt.year, pvt.month, pvt.day, pvt.hour, pvt.min, pvt.sec);
 
 		last_pvt = pvt;
 
