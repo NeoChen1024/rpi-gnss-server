@@ -104,6 +104,9 @@ int main(int argc, char *argv[])
 	/* zero last_pvt */
 	memset(&last_pvt, 0, sizeof(last_pvt));
 
+	// Make stdin unbuffered
+	setvbuf(stdin, NULL, _IONBF, 0);
+
 	while(1)
 	{
 		c = getc(stdin);
@@ -236,6 +239,7 @@ int main(int argc, char *argv[])
 		if(fwrite(writebuf, 1, UBX_HEADER_SIZE + PVT_SIZE + 2, fp) != UBX_HEADER_SIZE + PVT_SIZE + 2)
 		{
 			fprintf(stderr, "Unable to write to file!\n");
+			perror("fwrite");
 			return 1;
 		}
 		continue; // go back to read the next char
