@@ -1,17 +1,21 @@
-CC	= cc
-OPT	= -Og -pipe -fPIC -fPIE
-FLAGS	= $(OPT) -I. -Iinclude -g3 -pedantic -Wall -Wextra -D_DEFAULT_SOURCE
+CXX	= c++
+OPT	= -O2 -pipe -fPIC -fPIE
+FLAGS	= $(OPT) -I. -Iinclude -g3 -pedantic -Wall -Wextra
 #DBG	= -fsanitize=undefined,integer,nullability -fno-omit-frame-pointer
-CFLAGS = $(FLAGS) $(DBG) -std=c99
+CXXFLAGS = $(FLAGS) $(DBG) -std=c++11
 LDFLAGS	= -Wl,-O1 -Wl,--as-needed
+OBJS	= rawlogger.o ubx.o
 PRGS	= rawlogger
 
 .PHONY: all clean countline
 
 all: $(PRGS)
 
+rawlogger: $(OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
 countline:
 	wc -l *.h *.c
 
 clean:
-	rm -f $(PRGS)
+	rm -f $(PRGS) $(OBJS)

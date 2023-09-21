@@ -1,1 +1,3 @@
 rawlogger
+*.o
+*.ubx
