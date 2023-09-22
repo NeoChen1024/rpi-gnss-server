@@ -28,8 +28,6 @@ constexpr uint8_t UBX_RXM_SRFBX	= 0x13;
 
 typedef vector<uint8_t> ubx_buf_t;
 
-int ubx_read_frame(FILE *fp, ubx_buf_t &buf);
-
 class ubx_frame
 {
 public:
