@@ -187,6 +187,27 @@ ubx_nav_pvt::ubx_nav_pvt()
 
 bool ubx_nav_pvt::validate()
 {
+	if(data.month < 1 || data.month > 12)
+	{
+		return false;
+	}
+	if(data.day < 1 || data.day > 31)
+	{
+		return false;
+	}
+	if(data.hour > 23)
+	{
+		return false;
+	}
+	if(data.min > 59)
+	{
+		return false;
+	}
+	// leap second is 60
+	if(data.sec > 60)
+	{
+		return false;
+	}
 	return true;
 }
 
