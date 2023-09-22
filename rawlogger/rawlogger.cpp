@@ -91,6 +91,14 @@ resync_sync2:
 	return c;
 }
 
+void print_status_line(ubx_nav_pvt &pvt)
+{
+	fprintf(stderr, "iTOW=%07u %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu\r",
+		pvt.data.iTOW,
+		pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec,
+		pvt.data.numSV);
+}
+
 int main(int argc, char *argv[])
 {
 	FILE *readin = NULL;
@@ -169,10 +177,7 @@ int main(int argc, char *argv[])
 			last_pvt = pvt;
 
 			/* Print current status */
-			fprintf(stderr, "iTOW=%07u %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu\r",
-				pvt.data.iTOW,
-				pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec,
-				pvt.data.numSV);
+			print_status_line(pvt);
 		}
 
 		/* Passthrough */

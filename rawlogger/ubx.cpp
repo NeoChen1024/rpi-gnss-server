@@ -4,7 +4,95 @@
 
 namespace UBX
 {
+using std::string;
 using std::vector;
+using std::map;
+
+// UBX IDs
+map<uint8_t, string> ubx_class_names =
+{
+	{0x01, "NAV"},
+	{0x02, "RXM"},
+	{0x0A, "MON"},
+};
+
+map<uint8_t, string> ubx_mon_names =
+{
+	{0x38, "RF"},
+	{}
+};
+
+map<uint8_t, string> ubx_nav_names =
+{
+	{0x07, "PVT"},
+	{0x35, "ODO"},
+	{0x61, "EOE"},
+	{0x35, "SAT"},
+	{0x43, "SIG"},
+	{0x32, "SBAS"}
+};
+
+map<uint8_t, string> ubx_rxm_names =
+{
+	{0x14, "MEASX"},
+	{0x15, "RAWX"},
+	{0x13, "SRFBX"}
+};
+
+uint8_t getu1(ubx_buf_t &buf, size_t offset)
+{
+	return buf.at(offset);
+}
+
+uint16_t getu2(ubx_buf_t &buf, size_t offset)
+{
+	return buf.at(offset) | (buf.at(offset + 1) << 8);
+}
+
+uint32_t getu4(ubx_buf_t &buf, size_t offset)
+{
+	return
+		 buf.at(offset) |
+		(buf.at(offset + 1) << 8) |
+		(buf.at(offset + 2) << 16) |
+		(buf.at(offset + 3) << 24);
+}
+
+int8_t geti1(ubx_buf_t &buf, size_t offset)
+{
+	return buf.at(offset);
+}
+
+int16_t geti2(ubx_buf_t &buf, size_t offset)
+{
+	return buf.at(offset) | (buf.at(offset + 1) << 8);
+}
+
+int32_t geti4(ubx_buf_t &buf, size_t offset)
+{
+	return
+		 buf.at(offset) |
+		(buf.at(offset + 1) << 8) |
+		(buf.at(offset + 2) << 16) |
+		(buf.at(offset + 3) << 24);
+}
+
+float getr4(ubx_buf_t &buf, size_t offset)
+{
+	uint32_t tmp = getu4(buf, offset);
+	return *(float *)&tmp;
+}
+
+double getr8(ubx_buf_t &buf, size_t offset)
+{
+	uint64_t tmp = getu4(buf, offset) | ((uint64_t)getu4(buf, offset + 4) << 32);
+	return *(double *)&tmp;
+}
+
+uint8_t getch(ubx_buf_t &buf, size_t offset)
+{
+	return getu1(buf, offset);
+}
 
 void ubx_frame::clear()
 {
