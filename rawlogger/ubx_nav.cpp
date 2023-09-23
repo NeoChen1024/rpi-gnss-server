@@ -134,6 +134,10 @@ string ubx_nav_pvt::get_fix_type()
 {
 	// fixType & flags
 	string fix_type;
+	if(this->valid == false)
+	{
+		return "INVALID";
+	}
 	switch (data.fixType)
 	{
 	case 0:
