@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <stdint.h>
 
 namespace UBX

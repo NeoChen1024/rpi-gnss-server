@@ -16,6 +16,10 @@
 #include <sys/stat.h>
 #include <assert.h>
 #include <errno.h>
+#include <getopt.h>
+
+#define RETURN_ERR \
+	return 1
 
 using namespace UBX;
 
@@ -101,22 +105,31 @@ void print_status_line(ubx_nav_pvt &pvt)
 
 int main(int argc, char *argv[])
 {
-	FILE *readin = NULL;
+	bool debug = false;
+	FILE *readin = stdin;
 	FILE *writeout = NULL;
 
-	// Get filename from command line
-	if(argc > 1)
+	int opt;
+
+	while((opt = getopt(argc, argv, "f:d")) != -1)
 	{
-		readin = fopen(argv[1], "rb");
-		if(readin == NULL)
+		switch(opt)
 		{
-			perror(argv[1]);
-			return 1;
+		case 'f':
+			readin = fopen(optarg, "rb");
+			if(readin == NULL)
+			{
+				perror(optarg);
+				RETURN_ERR;
+			}
+			break;
+		case 'd':
+			debug = true;
+			break;
+		default:
+			fprintf(stderr, "Usage: %s [-f input_file] [-d]\n", argv[0]);
+			RETURN_ERR;
 		}
-	}
-	else
-	{
-		readin = stdin;
 	}
 
 	ubx_nav_pvt last_pvt;
@@ -135,6 +148,11 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "Invalid frame!\n");
 			frame.dump(stderr);
 			continue;
+		}
+		if(debug)
+		{
+			ubx_any_msg msg(frame);
+			msg.dump(stderr);
 		}
 		ubx_nav_pvt pvt(frame);
 		if(pvt.valid)
@@ -156,7 +174,7 @@ int main(int argc, char *argv[])
 						if(errno != EEXIST)
 						{
 							perror(dirname);
-							return 1;
+							RETURN_ERR;
 						}
 					}
 					fprintf(stderr, "\nCreated directory %s\n", dirname);
@@ -169,7 +187,7 @@ int main(int argc, char *argv[])
 				if(writeout == NULL)
 				{
 					fprintf(stderr, "Unable to open file %s!\n", filename);
-					return 1;
+					RETURN_ERR;
 				}
 				fprintf(stderr, "\nOpened file %s\n", filename);
 			}

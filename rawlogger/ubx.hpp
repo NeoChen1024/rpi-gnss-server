@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <cstddef>
 #include <vector>
 #include <map>
 #include <string>
@@ -12,6 +13,8 @@
 namespace UBX
 {
 using std::vector;
+using std::map;
+using std::string;
 
 constexpr uint8_t UBX_SYNC1	= 0xB5;
 constexpr uint8_t UBX_SYNC2	= 0x62;
@@ -29,6 +32,9 @@ constexpr uint8_t UBX_RXM_RAWX	= 0x15;
 constexpr uint8_t UBX_RXM_SRFBX	= 0x13;
 
 typedef vector<uint8_t> ubx_buf_t;
+typedef map<uint8_t, string> ubx_name_map_t;
+
+string ubx_msg_name(uint8_t class_id, uint8_t msg_id);
 
 class ubx_frame
 {
@@ -51,7 +57,23 @@ private:
 	bool validate(ubx_buf_t &buf);
 };
 
-class ubx_nav_pvt
+class ubx_any_msg
+{
+public:
+	bool valid;
+	uint8_t class_id;
+	uint8_t msg_id;
+	ubx_buf_t payload;
+	ubx_any_msg();
+	ubx_any_msg(ubx_frame &frame);
+	bool parse(ubx_frame &frame);
+	void clear();
+	void dump(FILE *fp);
+private:
+	bool validate();
+};
+
+class ubx_nav_pvt : public ubx_any_msg
 {
 public:
 	struct _ubx_nav_pvt data;
