@@ -153,13 +153,13 @@ string ubx_nav_pvt::get_fix_type()
 		fix_type = "3D";
 		break;
 	case 4:
-		fix_type = "GNSS+DR";
+		fix_type = "G+DR";
 		break;
 	case 5:
 		fix_type = "TIME";
 		break;
 	default:
-		fix_type = "UNKNOWN";
+		fix_type = "?";
 	}
 	if (data.flags & 0x02)
 	{
