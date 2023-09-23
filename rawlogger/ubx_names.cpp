@@ -4,8 +4,8 @@ namespace UBX
 {
 using std::map;
 
-// UBX IDs
-ubx_name_map_t ubx_class_names =
+// UBX Class/Message IDs
+static ubx_name_map_t ubx_class_names =
 {
 	{0x01, "NAV"},
 	{0x02, "RXM"},
@@ -20,7 +20,7 @@ ubx_name_map_t ubx_class_names =
 	{0x27, "SEC"}
 };
 
-ubx_name_map_t ubx_mon_names =
+static ubx_name_map_t ubx_mon_names =
 {
 	{0x36, "COMMS"},
 	{0x28, "GNSS"},
@@ -39,7 +39,7 @@ ubx_name_map_t ubx_mon_names =
 	{0x39, "SYS"} // not in u-blox documentation, but u-center has support for it
 };
 
-ubx_name_map_t ubx_nav_names =
+static ubx_name_map_t ubx_nav_names =
 {
 	{0x22, "CLOCK"},
 	{0x04, "DOP"},
@@ -71,7 +71,7 @@ ubx_name_map_t ubx_nav_names =
 	{0x32, "SBAS"}
 };
 
-ubx_name_map_t ubx_rxm_names =
+static ubx_name_map_t ubx_rxm_names =
 {
 	{0x14, "MEASX"},
 	{0x15, "RAWX"},
@@ -79,21 +79,21 @@ ubx_name_map_t ubx_rxm_names =
 	{0x13, "SRFBX"}
 };
 
-ubx_name_map_t ubx_tim_names =
+static ubx_name_map_t ubx_tim_names =
 {
 	{0x01, "TP"},
 	{0x03, "TM2"},
 	{0x06, "VRFY"}
 };
 
-ubx_name_map_t ubx_sec_names =
+static ubx_name_map_t ubx_sec_names =
 {
 	{0x03, "UNIQID"},
 	{0x09, "SIG"}, // not in u-blox documentation, but u-center has support for it
 	{0x10, "SIGLOG"} // same as above
 };
 
-map<string, ubx_name_map_t> ubx_names =
+static map<string, ubx_name_map_t> ubx_names =
 {
 	{"MON", ubx_mon_names},
 	{"NAV", ubx_nav_names},
@@ -129,4 +129,46 @@ string ubx_msg_name(uint8_t class_id, uint8_t msg_id)
 	return class_name + "-" + msg_name;
 }
 
+// u-blox GNSS id
+static ubx_name_map_t ubx_gnssid_names =
+{
+	{0, "GPS"},
+	{1, "SBAS"},
+	{2, "GAL"},
+	{3, "BDS"},
+	{4, "IMES"},
+	{5, "QZSS"},
+	{6, "GLO"},
+	{7, "NavIC"}
+};
+
+static ubx_name_map_t ubx_gnssid_abbr_names =
+{
+	{0, "G"},
+	{1, "S"},
+	{2, "E"},
+	{3, "B"},
+	{4, "I"},
+	{5, "Q"},
+	{6, "R"},
+	{7, "N"}
+};
+
+string ubx_gnssid_name(uint8_t gnssid)
+{
+	if(ubx_gnssid_names.count(gnssid) == 0)
+	{
+		return "?";
+	}
+	return ubx_gnssid_names[gnssid];
+}
+
+string ubx_gnssid_abbr_name(uint8_t gnssid)
+{
+	if(ubx_gnssid_abbr_names.count(gnssid) == 0)
+	{
+		return "?";
+	}
+	return ubx_gnssid_abbr_names[gnssid];
+}
 } // namespace UBX

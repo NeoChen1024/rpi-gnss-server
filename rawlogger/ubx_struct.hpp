@@ -1,5 +1,8 @@
 #include <cstddef>
 #include <stdint.h>
+#include "ubx_def.hpp"
+
+#pragma once
 
 namespace UBX
 {

@@ -8,7 +8,10 @@
 #include <map>
 #include <string>
 
+#include "ubx_def.hpp"
 #include "ubx_struct.hpp"
+
+#pragma once
 
 namespace UBX
 {
@@ -16,25 +19,9 @@ using std::vector;
 using std::map;
 using std::string;
 
-constexpr uint8_t UBX_SYNC1	= 0xB5;
-constexpr uint8_t UBX_SYNC2	= 0x62;
-constexpr uint8_t UBX_CLASS_OFFSET = 0;
-constexpr uint8_t UBX_MSG_OFFSET = 1;
-constexpr uint8_t UBX_LENGTH_OFFSET = 2;
-constexpr uint8_t UBX_HEADER_SIZE	= 4;
-constexpr uint8_t UBX_CKSUM_SIZE	= 2;
-
-constexpr uint8_t UBX_CLASS_NAV	= 0x01;
-constexpr uint8_t UBX_CLASS_RXM	= 0x02;
-constexpr uint8_t UBX_CLASS_MON	= 0x0A;
-constexpr uint8_t UBX_NAV_PVT	= 0x07;
-constexpr uint8_t UBX_RXM_RAWX	= 0x15;
-constexpr uint8_t UBX_RXM_SRFBX	= 0x13;
-
-typedef vector<uint8_t> ubx_buf_t;
-typedef map<uint8_t, string> ubx_name_map_t;
-
 string ubx_msg_name(uint8_t class_id, uint8_t msg_id);
+string ubx_gnssid_name(uint8_t gnssid);
+string ubx_gnssid_abbr_name(uint8_t gnssid);
 
 class ubx_frame
 {
@@ -64,13 +51,12 @@ public:
 	uint8_t class_id;
 	uint8_t msg_id;
 	ubx_buf_t payload;
+
 	ubx_any_msg();
 	ubx_any_msg(ubx_frame &frame);
 	bool parse(ubx_frame &frame);
 	void clear();
 	void dump(FILE *fp);
-private:
-	bool validate();
 };
 
 class ubx_nav_pvt : public ubx_any_msg
@@ -78,6 +64,7 @@ class ubx_nav_pvt : public ubx_any_msg
 public:
 	struct _ubx_nav_pvt data;
 	bool valid;
+
 	ubx_nav_pvt();
 	ubx_nav_pvt(ubx_frame &frame);
 	bool parse(ubx_frame &frame);

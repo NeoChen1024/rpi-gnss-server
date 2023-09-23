@@ -190,15 +190,11 @@ bool ubx_any_msg::parse(ubx_frame &frame)
 	return true;
 }
 
-bool ubx_any_msg::validate()
-{
-	return true;
-}
-
 void ubx_any_msg::dump(FILE *fp)
 {
-	fprintf(fp, "%s\t> ",
-		("UBX-" + ubx_msg_name(this->class_id, this->msg_id)).c_str());
+	fprintf(fp, "%s (%zd)\t> ",
+		("UBX-" + ubx_msg_name(this->class_id, this->msg_id)).c_str(),
+		this->payload.size());
 	for(auto i: this->payload)
 	{
 		fprintf(fp, "%02x", i);
