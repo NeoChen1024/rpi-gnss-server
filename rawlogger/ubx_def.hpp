@@ -30,5 +30,40 @@ constexpr uint8_t UBX_RXM_SRFBX	= 0x13;
 typedef vector<uint8_t> ubx_buf_t;
 typedef map<uint8_t, string> ubx_name_map_t;
 
-class ubx_frame;
+class ubx_frame
+{
+public:
+	uint8_t class_id;
+	uint8_t msg_id;
+	uint16_t length;
+	ubx_buf_t payload;
+	// CK_A is high byte, CK_B is low byte
+	uint16_t cksum;
+
+	bool valid;
+
+	ubx_frame();
+	ubx_frame(ubx_buf_t &buf);
+	void clear();
+	void dump(FILE *fp);
+	int write(FILE *fp);
+private:
+	bool validate(ubx_buf_t &buf);
+};
+
+class ubx_any_msg
+{
+public:
+	bool valid;
+	uint8_t class_id;
+	uint8_t msg_id;
+	ubx_buf_t payload;
+
+	ubx_any_msg();
+	ubx_any_msg(ubx_frame &frame);
+	bool parse(ubx_frame &frame);
+	void clear();
+	void dump(FILE *fp);
+};
+
 } // namespace UBX

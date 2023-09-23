@@ -97,8 +97,9 @@ resync_sync2:
 
 void print_status_line(ubx_nav_pvt &pvt)
 {
-	fprintf(stderr, "iTOW=%07u %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu\r",
+	fprintf(stderr, "iTOW=%07u %10s %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu\r",
 		pvt.data.iTOW,
+		pvt.get_fix_type().c_str(),
 		pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec,
 		pvt.data.numSV);
 }

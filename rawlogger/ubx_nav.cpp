@@ -1,7 +1,10 @@
 #include "ubx.hpp"
+#include "ubx_nav.hpp"
+#include <string>
 
 namespace UBX
 {
+using std::string;
 ubx_nav_pvt::ubx_nav_pvt()
 {
 	clear();
@@ -20,6 +23,15 @@ void ubx_nav_pvt::clear()
 
 bool ubx_nav_pvt::validate()
 {
+	// valid bitfield:
+	// bit 0: valid Date
+	// bit 1: valid Time
+	// bit 2: fully resolved
+	// bit 3: valid Mag
+	if((data.valid & 0x03) != 0x03)
+	{
+		return false;
+	}
 	if(data.month < 1 || data.month > 12)
 	{
 		return false;
@@ -51,7 +63,7 @@ bool ubx_nav_pvt::parse(ubx_frame &frame)
 	{
 		return false;
 	}
-	if(ubx_msg_name(frame.class_id, frame.msg_id) != std::string("NAV-PVT"))
+	if(frame.class_id != UBX_CLASS_NAV || frame.msg_id != UBX_NAV_PVT)
 	{
 		return false; // ignore non NAV-PVT frames
 	}
@@ -117,4 +129,39 @@ void ubx_nav_pvt::dump(FILE *fp)
 	fprintf(fp, "pDOP: %u\n", data.pDOP);
 	fprintf(fp, "headVeh: %d\n", data.headVeh);
 }
+
+string ubx_nav_pvt::get_fix_type()
+{
+	// fixType & flags
+	string fix_type;
+	switch (data.fixType)
+	{
+	case 0:
+		fix_type = "NO";
+		break;
+	case 1:
+		fix_type = "DR";
+		break;
+	case 2:
+		fix_type = "2D";
+		break;
+	case 3:
+		fix_type = "3D";
+		break;
+	case 4:
+		fix_type = "GNSS+DR";
+		break;
+	case 5:
+		fix_type = "TIME";
+		break;
+	default:
+		fix_type = "UNKNOWN";
+	}
+	if (data.flags & 0x02)
+	{
+		fix_type += "/DGNSS";
+	}
+	return fix_type;
+}
+
 } // namespace UBX
