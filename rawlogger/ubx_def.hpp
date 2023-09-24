@@ -32,6 +32,18 @@ typedef map<uint8_t, string> ubx_name_map_t;
 
 class ubx_frame
 {
+// x1 x2 x4 -> u1 u2 u4
+
+uint8_t getu1(ubx_buf_t &buf, size_t offset);
+uint16_t getu2(ubx_buf_t &buf, size_t offset);
+uint32_t getu4(ubx_buf_t &buf, size_t offset);
+int8_t geti1(ubx_buf_t &buf, size_t offset);
+int16_t geti2(ubx_buf_t &buf, size_t offset);
+int32_t geti4(ubx_buf_t &buf, size_t offset);
+float getr4(ubx_buf_t &buf, size_t offset);
+double getr8(ubx_buf_t &buf, size_t offset);
+uint8_t getch(ubx_buf_t &buf, size_t offset);
+
 public:
 	uint8_t class_id;
 	uint8_t msg_id;
