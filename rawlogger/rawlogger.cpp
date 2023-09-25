@@ -159,7 +159,9 @@ int main(int argc, char *argv[])
 			frame.dump(stderr);
 			continue;
 		}
-
+		/* Passthrough */
+		if(writeout != NULL)
+			frame.write(writeout);
 		if(debug)
 		{
 			ubx_any_msg msg(frame);
@@ -220,10 +222,6 @@ int main(int argc, char *argv[])
 
 			last_pvt = current_pvt;
 		}
-
-		/* Passthrough */
-		if(writeout != NULL)
-			frame.write(writeout);
 	}
 	fputs("\nEOF!?\n", stderr);
 	return 0;
