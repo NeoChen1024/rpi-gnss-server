@@ -114,6 +114,7 @@ void print_status_line(ubx_nav_pvt &pvt)
 int main(int argc, char *argv[])
 {
 	bool debug = false;
+	bool no_write = false;
 	FILE *readin = stdin;
 	FILE *writeout = NULL;
 
@@ -121,7 +122,7 @@ int main(int argc, char *argv[])
 
 	int opt;
 
-	while((opt = getopt(argc, argv, "f:d")) != -1)
+	while((opt = getopt(argc, argv, "f:dn")) != -1)
 	{
 		switch(opt)
 		{
@@ -136,8 +137,11 @@ int main(int argc, char *argv[])
 		case 'd':
 			debug = true;
 			break;
+		case 'n':
+			no_write = true;
+			break;
 		default:
-			fprintf(stderr, "Usage: %s [-f input_file] [-d]\n", argv[0]);
+			fprintf(stderr, "Usage: %s [-f input_file] [-n] [-d]\n", argv[0]);
 			RETURN_ERR;
 		}
 	}
@@ -188,7 +192,7 @@ int main(int argc, char *argv[])
 			fputs(" EOE", stderr);
 
 			/* Open new file if either no file is open, or the PVT day is changed */
-			if(writeout == NULL || current_pvt.data.day != last_pvt.data.day)
+			if((writeout == NULL || current_pvt.data.day != last_pvt.data.day) && !no_write)
 			{
 				if(writeout != NULL)
 					fclose(writeout);
