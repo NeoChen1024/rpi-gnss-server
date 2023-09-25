@@ -117,6 +117,8 @@ int main(int argc, char *argv[])
 	FILE *readin = stdin;
 	FILE *writeout = NULL;
 
+	setvbuf(stderr, NULL, _IONBF, 0);
+
 	int opt;
 
 	while((opt = getopt(argc, argv, "f:d")) != -1)
