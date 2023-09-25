@@ -24,14 +24,13 @@ constexpr uint8_t UBX_CLASS_NAV	= 0x01;
 constexpr uint8_t UBX_CLASS_RXM	= 0x02;
 constexpr uint8_t UBX_CLASS_MON	= 0x0A;
 constexpr uint8_t UBX_NAV_PVT	= 0x07;
+constexpr uint8_t UBX_NAV_EOE	= 0x61;
 constexpr uint8_t UBX_RXM_RAWX	= 0x15;
 constexpr uint8_t UBX_RXM_SRFBX	= 0x13;
 
 typedef vector<uint8_t> ubx_buf_t;
 typedef map<uint8_t, string> ubx_name_map_t;
 
-class ubx_frame
-{
 // x1 x2 x4 -> u1 u2 u4
 
 uint8_t getu1(ubx_buf_t &buf, size_t offset);
@@ -44,6 +43,8 @@ float getr4(ubx_buf_t &buf, size_t offset);
 double getr8(ubx_buf_t &buf, size_t offset);
 uint8_t getch(ubx_buf_t &buf, size_t offset);
 
+class ubx_frame
+{
 public:
 	uint8_t class_id;
 	uint8_t msg_id;

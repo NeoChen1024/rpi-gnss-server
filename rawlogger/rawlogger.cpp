@@ -4,6 +4,7 @@
  * ===================================== */
 
 #include "ubx.hpp"
+#include "ubx_nav.hpp"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -97,8 +98,14 @@ resync_sync2:
 
 void print_status_line(ubx_nav_pvt &pvt)
 {
-	fprintf(stderr, "\riTOW=%07u %10s %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu",
-		pvt.data.iTOW,
+	char buf[128];
+	fputc('\r', stderr);
+	for(int i = 0; i < 80; i++)
+		buf[i] = ' ';
+	buf[80] = '\0';
+	fputs(buf, stderr);
+	fprintf(stderr, "\riTOW=%06u.%03u %10s %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu",
+		pvt.data.iTOW / 1000, pvt.data.iTOW % 1000,
 		pvt.get_fix_type().c_str(),
 		pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec,
 		pvt.data.numSV);
@@ -133,16 +140,16 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	ubx_nav_pvt last_pvt;
+	ubx_nav_pvt current_pvt, last_pvt;
 
 	while(1)
 	{
 		ubx_buf_t buf;
-		int ret = ubx_read_frame(readin, buf);
-		if(ret == EOF)
+		if(ubx_read_frame(readin, buf) == EOF)
 		{
 			break;
 		}
+
 		ubx_frame frame(buf);
 		if(!frame.valid)
 		{
@@ -150,26 +157,42 @@ int main(int argc, char *argv[])
 			frame.dump(stderr);
 			continue;
 		}
+
 		if(debug)
 		{
 			ubx_any_msg msg(frame);
 			msg.dump(stderr);
 		}
+
 		ubx_nav_pvt pvt(frame);
 		if(pvt.valid)
 		{
 			//pvt.dump(stderr);
+			current_pvt = pvt;
+			print_status_line(pvt);
+		}
+
+		ubx_nav_eoe eoe(frame);
+		if(eoe.valid)
+		{
+			//eoe.dump(stderr);
+			if(eoe.iTOW != current_pvt.data.iTOW)
+			{
+				fprintf(stderr, "\nEOE iTOW mismatch! %u != %u\n", eoe.iTOW, last_pvt.data.iTOW);
+			}
 			
+			fputs(" EOE", stderr);
+
 			/* Open new file if either no file is open, or the PVT day is changed */
-			if(writeout == NULL || pvt.data.day != last_pvt.data.day)
+			if(writeout == NULL || current_pvt.data.day != last_pvt.data.day)
 			{
 				if(writeout != NULL)
 					fclose(writeout);
 				/* if month changed, make new directory */
 				char dirname[64];
-				if(pvt.data.month != last_pvt.data.month)
+				if(current_pvt.data.month != last_pvt.data.month)
 				{
-					snprintf(dirname, 64, "%04u-%02hhu", pvt.data.year, pvt.data.month);
+					snprintf(dirname, 64, "%04u-%02hhu", current_pvt.data.year, current_pvt.data.month);
 					if(mkdir(dirname, 0755) != 0)
 					{
 						if(errno != EEXIST)
@@ -183,7 +206,7 @@ int main(int argc, char *argv[])
 				char filename[128];
 				snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
 					dirname,
-					pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec);
+					current_pvt.data.year, current_pvt.data.month, current_pvt.data.day, current_pvt.data.hour, current_pvt.data.min, current_pvt.data.sec);
 				writeout = fopen(filename, "wb");
 				if(writeout == NULL)
 				{
@@ -193,10 +216,7 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "\nOpened file %s\n", filename);
 			}
 
-			last_pvt = pvt;
-
-			/* Print current status */
-			print_status_line(pvt);
+			last_pvt = current_pvt;
 		}
 
 		/* Passthrough */

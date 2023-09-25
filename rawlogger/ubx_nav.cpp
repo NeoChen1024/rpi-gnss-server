@@ -168,4 +168,56 @@ string ubx_nav_pvt::get_fix_type()
 	return fix_type;
 }
 
+ubx_nav_eoe::ubx_nav_eoe()
+{
+	clear();
+}
+
+ubx_nav_eoe::ubx_nav_eoe(ubx_frame &frame)
+{
+	parse(frame);
+}
+
+bool ubx_nav_eoe::parse(ubx_frame &frame)
+{
+	this->valid = false;
+	if(frame.valid == false)
+	{
+		return false;
+	}
+	if(frame.class_id != UBX_CLASS_NAV || frame.msg_id != UBX_NAV_EOE)
+	{
+		return false; // ignore non NAV-EOE frames
+	}
+	if(frame.length != 4)
+	{
+		return false;
+	}
+	this->iTOW = getu4(frame.payload, 0);
+	if(validate())
+	{
+		this->valid = true;
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+void ubx_nav_eoe::clear()
+{
+	this->valid = false;
+	this->iTOW = 0;
+}
+
+bool ubx_nav_eoe::validate()
+{
+	if(this->iTOW > (86400 * 1000 * 7))
+	{
+		return false;
+	}
+	return true;
+}
+
 } // namespace UBX

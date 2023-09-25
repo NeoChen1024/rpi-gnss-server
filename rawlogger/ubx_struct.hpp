@@ -1,14 +1,18 @@
 #include <cstddef>
+#include <cstdint>
 #include <stdint.h>
+#include <vector>
 #include "ubx_def.hpp"
 
 #pragma once
 
 namespace UBX
 {
+using std::vector;
 
 constexpr size_t UBX_NAV_PVT_SIZE = 92;
 
+// UBX-NAV-PVT
 struct _ubx_nav_pvt
 {
 	uint32_t iTOW;
@@ -44,4 +48,19 @@ struct _ubx_nav_pvt
 	uint8_t reserved2[4];
 } __attribute((packed));
 
-}
+struct _ubx_nav_sig_data
+{
+	uint8_t gnssId;
+	uint8_t svId;
+	uint8_t sigId;
+	uint8_t freqId; // GLONASS, -7 for real frequency slot number
+	int16_t prRes;	// unit = 0.1m
+	uint8_t cno;	// dbHz
+	uint8_t qualityInd;
+	uint8_t corrSource;
+	uint8_t ionoModel;
+	uint16_t sigFlags;
+	uint8_t reserved1[4];
+} __attribute((packed));
+
+} // namespace UBX
