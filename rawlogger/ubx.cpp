@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <cstring>
 #include <stdio.h>
 #include "ubx.hpp"
 #include <endian.h>
@@ -48,13 +49,17 @@ int32_t geti4(ubx_buf_t &buf, size_t offset)
 float getr4(ubx_buf_t &buf, size_t offset)
 {
 	uint32_t tmp = getu4(buf, offset);
-	return *(float *)&tmp;
+	float result;
+	memcpy(&result, &tmp, sizeof(result));
+	return result;
 }
 
 double getr8(ubx_buf_t &buf, size_t offset)
 {
 	uint64_t tmp = getu4(buf, offset) | ((uint64_t)getu4(buf, offset + 4) << 32);
-	return *(double *)&tmp;
+	double result;
+	memcpy(&result, &tmp, sizeof(result));
+	return result;
 }
 
 uint8_t getch(ubx_buf_t &buf, size_t offset)

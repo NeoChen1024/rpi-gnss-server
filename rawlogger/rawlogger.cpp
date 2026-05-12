@@ -5,6 +5,7 @@
 
 #include "ubx.hpp"
 #include "ubx_nav.hpp"
+#include "ubx_dump_gen.hpp"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -168,8 +169,7 @@ int main(int argc, char *argv[])
 			frame.write(writeout);
 		if(debug)
 		{
-			ubx_any_msg msg(frame);
-			msg.dump(stderr);
+			ubx_dump_any(frame, stderr);
 		}
 
 		ubx_nav_pvt pvt(frame);

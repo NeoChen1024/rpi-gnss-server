@@ -1,3 +1,5 @@
 rawlogger
 *.o
 *.ubx
+*_gen.cpp
+*_gen.hpp

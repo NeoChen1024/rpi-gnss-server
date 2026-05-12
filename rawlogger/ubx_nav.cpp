@@ -107,27 +107,37 @@ bool ubx_nav_pvt::parse(ubx_frame &frame)
 
 void ubx_nav_pvt::dump(FILE *fp)
 {
-	fputs("=====================\n", fp);
-	fprintf(fp, "iTOW: %u\n", data.iTOW);
-	fprintf(fp, "Date: %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu\n",
-		data.year, data.month, data.day, data.hour, data.min, data.sec);
-	fprintf(fp, "valid: %u\n", data.valid);
-	fprintf(fp, "tAcc: %u\n", data.tAcc);
-	fprintf(fp, "nano: %d\n", data.nano);
-	fprintf(fp, "fixType: %u\n", data.fixType);
-	fprintf(fp, "flags: %u\n", data.flags);
-	fprintf(fp, "flags2: %u\n", data.flags2);
-	fprintf(fp, "numSV: %u\n", data.numSV);
-	fprintf(fp, "lon: %d, lat: %d\n", data.lon, data.lat);
-	fprintf(fp, "height: %d, hMSL: %d\n", data.height, data.hMSL);
-	fprintf(fp, "hAcc: %u, vAcc: %u\n", data.hAcc, data.vAcc);
-	fprintf(fp, "velN/E/D: %d/%d/%d\n", data.velN, data.velE, data.velD);
-	fprintf(fp, "gSpeed: %d\n", data.gSpeed);
-	fprintf(fp, "headMot: %d\n", data.headMot);
-	fprintf(fp, "sAcc: %u\n", data.sAcc);
-	fprintf(fp, "headAcc: %u\n", data.headAcc);
-	fprintf(fp, "pDOP: %u\n", data.pDOP);
-	fprintf(fp, "headVeh: %d\n", data.headVeh);
+	fprintf(fp, "(NAV-PVT");
+	fprintf(fp, ", iTOW=%u", data.iTOW);
+	fprintf(fp, ", year=%u", data.year);
+	fprintf(fp, ", month=%hhu", data.month);
+	fprintf(fp, ", day=%hhu", data.day);
+	fprintf(fp, ", hour=%hhu", data.hour);
+	fprintf(fp, ", min=%hhu", data.min);
+	fprintf(fp, ", sec=%hhu", data.sec);
+	fprintf(fp, ", valid=%u", data.valid);
+	fprintf(fp, ", tAcc=%u", data.tAcc);
+	fprintf(fp, ", nano=%d", data.nano);
+	fprintf(fp, ", fixType=%hhu", data.fixType);
+	fprintf(fp, ", flags=%u", data.flags);
+	fprintf(fp, ", flags2=%u", data.flags2);
+	fprintf(fp, ", numSV=%hhu", data.numSV);
+	fprintf(fp, ", lon=%d", data.lon);
+	fprintf(fp, ", lat=%d", data.lat);
+	fprintf(fp, ", height=%d", data.height);
+	fprintf(fp, ", hMSL=%d", data.hMSL);
+	fprintf(fp, ", hAcc=%u", data.hAcc);
+	fprintf(fp, ", vAcc=%u", data.vAcc);
+	fprintf(fp, ", velN=%d", data.velN);
+	fprintf(fp, ", velE=%d", data.velE);
+	fprintf(fp, ", velD=%d", data.velD);
+	fprintf(fp, ", gSpeed=%d", data.gSpeed);
+	fprintf(fp, ", headMot=%d", data.headMot);
+	fprintf(fp, ", sAcc=%u", data.sAcc);
+	fprintf(fp, ", headAcc=%u", data.headAcc);
+	fprintf(fp, ", pDOP=%u", data.pDOP);
+	fprintf(fp, ", headVeh=%d", data.headVeh);
+	fputs(")\n", fp);
 }
 
 string ubx_nav_pvt::get_fix_type()
@@ -218,6 +228,13 @@ bool ubx_nav_eoe::validate()
 		return false;
 	}
 	return true;
+}
+
+void ubx_nav_eoe::dump(FILE *fp)
+{
+	fprintf(fp, "(NAV-EOE");
+	fprintf(fp, ", iTOW=%u", this->iTOW);
+	fputs(")\n", fp);
 }
 
 } // namespace UBX
