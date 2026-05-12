@@ -1,0 +1,3 @@
+[submodule "rawlogger/3rd-party"]
+	path = 3rdparty/pyubx2
+	url = https://github.com/semuconsulting/pyubx2.git
