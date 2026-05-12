@@ -26,8 +26,14 @@ def print_status_line(
     lat: Optional[float] = None,
     lon: Optional[float] = None,
     pDOP: Optional[float] = None,
+    eoe: bool = False,
 ) -> None:
-    """Print an in-place-updating status line (like the C++ original)."""
+    """Print an in-place-updating status line (like the C++ original).
+
+    If *eoe* is True the line is prefixed with "EOE " to indicate that a
+    NAV-EOE message arrived after the previous NAV-PVT.
+    """
+    eoe_mark = "EOE " if eoe else "    "
     date_str = f"{year:04d}/{month:02d}/{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
     pos_str = ""
     if lat is not None and lon is not None:
@@ -36,8 +42,8 @@ def print_status_line(
     if pDOP is not None:
         dop_str = f" pDOP={pDOP:.1f}"
     line = (
-        f"iTOW={iTOW:06d} {fix_type:>8s} {date_str}"
-        f"  Sats: {numSV:02d}{pos_str}{dop_str}  \r"
+        f"\r{eoe_mark}iTOW={iTOW:06d} {fix_type:>8s} {date_str}"
+        f"  Sats: {numSV:02d}{pos_str}{dop_str}  "
     )
     sys.stderr.write(line)
     sys.stderr.flush()

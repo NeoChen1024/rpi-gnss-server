@@ -33,7 +33,7 @@ def _extract_pvt_ts(parsed: object) -> Optional[tuple[int, int, int, int, int, i
         getattr(parsed, "day", 0),
         getattr(parsed, "hour", 0),
         getattr(parsed, "min", 0),
-        getattr(parsed, "sec", 0),
+        getattr(parsed, "second", 0),
     )
 
 
@@ -55,7 +55,7 @@ def run_normal(
     from pyubx2 import UBXMessageError  # type: ignore[import-untyped]
 
     last_status: dict = {}
-    last_eoe_itow: Optional[int] = None
+    pending_eoe: bool = False
 
     for raw_bytes, parsed in parse_stream(src.stream()):
         # Debug output for every parsed frame
@@ -80,14 +80,15 @@ def run_normal(
                 "day": getattr(parsed, "day", 0),
                 "hour": getattr(parsed, "hour", 0),
                 "minute": getattr(parsed, "min", 0),
-                "second": getattr(parsed, "sec", 0),
+                "second": getattr(parsed, "second", 0),
                 "numSV": getattr(parsed, "numSV", 0),
                 "lat": getattr(parsed, "lat", 0) / 1e7,
                 "lon": getattr(parsed, "lon", 0) / 1e7,
                 "pDOP": getattr(parsed, "pDOP", 0) / 100.0,
             }
             if not quiet:
-                print_status_line(**last_status)
+                print_status_line(**last_status, eoe=pending_eoe)
+                pending_eoe = False
 
         # Handle NAV-EOE for status line marker
         if identity == "NAV-EOE":
@@ -97,10 +98,7 @@ def run_normal(
                 print_error(
                     f"EOE iTOW mismatch! {eoe_itow} != {pvt_itow}"
                 )
-            if not quiet:
-                sys.stderr.write(" EOE")
-                sys.stderr.flush()
-            last_eoe_itow = eoe_itow
+            pending_eoe = True
 
 
 def _run_monitor(
