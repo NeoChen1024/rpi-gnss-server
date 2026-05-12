@@ -12,7 +12,7 @@ Main Target: Arch Linux ARM on Raspberry Pi 3B+ with minimal external hardware.
 | `rtkserv.sh` | RTKLib `str2str` startup script for NTRIP caster |
 | `daily-ubx.sh` | Collect raw UBX data daily (executed by cron) |
 | `rawlogger/` | Original C++ UBX protocol logger |
-| `src/neoubxlogger/` | Modern Python rewrite of rawlogger |
+| `pyubxlogger/src/neoubxlogger/` | Modern Python rewrite of rawlogger |
 
 ## neoubxlogger — Python UBX Protocol Logger
 
