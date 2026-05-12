@@ -10,9 +10,9 @@ Usage:
     python3 scripts/generate_ubx_parsers.py
 
 Output:
-    rawlogger/ubx_struct_gen.hpp  - Packed struct definitions
-    rawlogger/ubx_{class}_gen.hpp  - Parser class declarations (one per UBX class)
-    rawlogger/ubx_{class}_gen.cpp  - Parser implementations
+    neoubxlogger/ubx_struct_gen.hpp  - Packed struct definitions
+    neoubxlogger/ubx_{class}_gen.hpp  - Parser class declarations (one per UBX class)
+    neoubxlogger/ubx_{class}_gen.cpp  - Parser implementations
 """
 
 import os
@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple, Optional
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
-RAWLOGGER_DIR = os.path.join(PROJECT_DIR, "rawlogger")
+RAWLOGGER_DIR = os.path.join(PROJECT_DIR, "neoubxlogger")
 
 # Path to pyubx2 types modules
 PYUBX2_DIR = os.path.join(PROJECT_DIR, "3rdparty", "pyubx2", "src")

@@ -11,59 +11,61 @@ Main Target: Arch Linux ARM on Raspberry Pi 3B+ with minimal external hardware.
 | `chrony.conf` | NTP configuration excerpt using GNSS PPS |
 | `rtkserv.sh` | RTKLib `str2str` startup script for NTRIP caster |
 | `daily-ubx.sh` | Collect raw UBX data daily (executed by cron) |
-| `rawlogger/` | Original C++ UBX protocol logger |
-| `pyubxlogger/src/neoubxlogger/` | Modern Python rewrite of rawlogger |
+| `neoubxlogger/` | C++ UBX protocol logger |
 
-## neoubxlogger — Python UBX Protocol Logger
+## neoubxlogger — C++ UBX Protocol Logger
 
-A modern Python rewrite of `rawlogger` using **uv** for environment management.
+The original C++ implementation in `neoubxlogger/`.
 
-### Dependencies
-
-- [pyubx2](https://github.com/semuconsulting/pyubx2) — UBX protocol parsing
-- [Click](https://click.palletsprojects.com/) — CLI framework
-- [Rich](https://rich.readthedocs.io/) — Terminal status output
-- [Textual](https://textual.textualize.io/) — TUI monitoring dashboard
-- [pySerial](https://github.com/pyserial/pyserial) — Serial port support
-
-### Quick Start
+### Build
 
 ```bash
-# Install dependencies
-uv sync
+cd neoubxlogger
+make setup    # one-time: create .venv with Python codegen deps
+make          # codegen + compile + link
+```
 
-# Read from file, show parsed output, no write
-uv run python -m neoubxlogger -f testdata/20241103T000000.ubx -nd
+### Usage
 
-# Read from serial port with filtered output (only RXM-* messages)
-uv run python -m neoubxlogger -s /dev/ttyACM0 -b 115200 -a "RXM-*" -o filtered
+```bash
+# Read from file, passthrough to daily output
+./neoubxlogger < input.ubx
 
-# Read from TCP socket with auto-reconnect, normal status output
-uv run python -m neoubxlogger -t 192.168.1.100:5555
+# Read from file, no write
+./neoubxlogger -f input.ubx -n
 
-# Launch TUI dashboard
-uv run python -m neoubxlogger -f testdata/20241103T000000.ubx -w
+# TCP stream (auto-reconnects on disconnect)
+./neoubxlogger -t 192.168.1.100:5555 -n
+
+# TCP + quiet daemon mode (per-minute stats only)
+./neoubxlogger -t 192.168.1.100:5555 -n -q
+
+# Debug output (single-line dump every frame)
+./neoubxlogger -f input.ubx -d
 ```
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `-f, --file FILE` | Read from .ubx file |
-| `-s, --serial PORT` | Read from serial port |
-| `-b, --baud BAUD` | Serial baud rate (default: 115200) |
-| `-t, --tcp HOST:PORT` | Read from TCP socket (auto-reconnects) |
-| `-o, --output MODE` | Output mode: `passthrough`, `parsed`, `filtered` |
-| `-a, --allow PATTERN` | Allowed messages in filtered mode (supports glob, repeatable) |
-| `-n, --no-write` | Dry run — no file output |
-| `-d, --debug` | Verbose debug output for every parsed frame |
-| `-q, --quiet` | Silent daemon mode — errors only |
-| `-w, --watch` | Textual TUI monitoring dashboard |
+| `-f FILE` | Read from .ubx file (default: stdin) |
+| `-t HOST:PORT` | Read from TCP socket (auto-reconnects) |
+| `-n` | No write — passthrough to file disabled |
+| `-d` | Debug — dump every frame to stderr (single-line format) |
+| `-q` | Quiet daemon mode — suppress status line, show per-minute stats only |
 
-### Output
+`-f` and `-t` are mutually exclusive. `-d` and `-q` are mutually exclusive.
 
-Log files are written to `YYYY-MM/YYYYMMDDTHHMMSS.ubx` — one directory per month, one file per session start day, matching the original C++ behaviour.
+### Example daemon invocation
 
-## rawlogger — Original C++ UBX Protocol Logger
+```bash
+./neoubxlogger -t gnss-receiver.local:5555 -n -q
+```
 
-The original C++ implementation in `rawlogger/`. Compile with `make` in that directory.
+Output:
+```
+Connected to gnss-receiver.local:5555
+[neoubxlogger stats] avg rate: 12.3 KiB/s, frames: 452, FIX 100%
+[neoubxlogger stats] avg rate: 11.8 KiB/s, frames: 438, FIX 100%
+...
+```

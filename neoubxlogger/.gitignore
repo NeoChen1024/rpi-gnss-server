@@ -1,4 +1,4 @@
-rawlogger
+neoubxlogger
 *.o
 *.ubx
 *_gen.cpp

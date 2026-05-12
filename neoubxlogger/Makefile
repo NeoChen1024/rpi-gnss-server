@@ -4,11 +4,11 @@ FLAGS	= $(OPT) -I. -Iinclude -g3 -pedantic -Wall -Wextra
 #DBG	= -fsanitize=undefined,integer,nullability -fno-omit-frame-pointer
 CXXFLAGS = $(FLAGS) $(DBG) -std=c++11
 LDFLAGS	= -Wl,-O1 -Wl,--as-needed
-OBJS	= rawlogger.o ubx.o ubx_names.o ubx_nav.o
+OBJS	= neoubxlogger.o ubx.o ubx_names.o ubx_nav.o
 GEN_OBJS = ubx_nav_gen.o ubx_rxm_gen.o ubx_mon_gen.o ubx_tim_gen.o \
            ubx_esf_gen.o ubx_hnr_gen.o ubx_log_gen.o ubx_sec_gen.o \
            ubx_cfg_gen.o ubx_ack_gen.o ubx_dump_gen.o
-PRGS	= rawlogger
+PRGS	= neoubxlogger
 
 .PHONY: all clean countline gen setup
 
@@ -37,7 +37,7 @@ ubx_ids_gen.hpp ubx_struct_gen.hpp:
 $(GEN_OBJS): %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-rawlogger: $(OBJS) $(GEN_OBJS)
+neoubxlogger: $(OBJS) $(GEN_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^
 
 clean:
