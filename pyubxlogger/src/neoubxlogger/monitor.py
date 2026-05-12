@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 """Textual TUI live monitoring dashboard for neoubxlogger."""
 
 from __future__ import annotations

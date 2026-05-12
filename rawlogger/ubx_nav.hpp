@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Kelei Chen
+
 #include "ubx_def.hpp"
 #include "ubx_struct.hpp"
 

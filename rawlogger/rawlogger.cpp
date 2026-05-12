@@ -1,7 +1,5 @@
-/* ===================================== *
- * Rawlogger.cpp - UBX protocol logger	 *
- * Written by:  Neo_Chen (2023)		 *
- * ===================================== */
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Kelei Chen
 
 #include "ubx.hpp"
 #include "ubx_nav.hpp"

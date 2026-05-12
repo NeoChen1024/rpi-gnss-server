@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 """Display helpers: Rich-based status line for normal/debug/quiet modes."""
 
 from __future__ import annotations

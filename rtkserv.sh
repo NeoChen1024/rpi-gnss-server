@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 exec str2str -a 'BeiTian BT-800' -i 'u-blox ZED-F9P' -opt -TADJ=1 \
 	-px XX YY ZZ \
 	-msg '1004,1012,1077,1087,1230,1097,1107,1117,1127,1005,1007,1013,1017,1019,1020,1033,1045,1046,1044,1042' \

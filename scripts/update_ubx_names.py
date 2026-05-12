@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 """
 Parse UBX message types from the u-blox interface description markdown
 and generate updated rawlogger/ubx_names.cpp.
@@ -83,6 +86,15 @@ def generate_cpp(entries):
 
     # Build the C++ code
     lines = []
+    lines.append("/*")
+    lines.append(" * Auto-generated UBX message name tables.")
+    lines.append(" * Generated from the u-blox interface description document.")
+    lines.append(" *")
+    lines.append(" * This file is part of the rpi-gnss-server project.")
+    lines.append(" * Copyright (c) 2026, Kelei Chen")
+    lines.append(" * SPDX-License-Identifier: BSD-3-Clause")
+    lines.append(" */")
+    lines.append("")
     lines.append('#include "ubx.hpp"')
     lines.append("")
     lines.append("namespace UBX")

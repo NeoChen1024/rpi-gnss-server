@@ -1,3 +1,12 @@
+/*
+ * Auto-generated UBX message name tables.
+ * Generated from the u-blox interface description document.
+ *
+ * This file is part of the rpi-gnss-server project.
+ * Copyright (c) 2026, Kelei Chen
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
 #include "ubx.hpp"
 
 namespace UBX

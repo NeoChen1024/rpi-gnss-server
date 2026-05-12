@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 """Input sources for neoubxlogger: stdin, file, serial port, TCP socket."""
 
 from __future__ import annotations

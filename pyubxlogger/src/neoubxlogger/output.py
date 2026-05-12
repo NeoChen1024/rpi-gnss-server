@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Kelei Chen
+
 """Output handling: raw passthrough, parsed, and filtered file writing with rotation."""
 
 from __future__ import annotations
