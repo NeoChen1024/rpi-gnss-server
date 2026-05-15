@@ -19,7 +19,8 @@ import os
 import re
 import sys
 from collections import OrderedDict
-from typing import Any, Dict, List
+from dataclasses import dataclass, field
+from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -32,6 +33,29 @@ sys.path.insert(0, PYUBX2_DIR)
 TARGET_CLASSES = ("NAV", "RXM", "MON", "TIM", "ESF", "HNR", "LOG", "SEC", "CFG", "ACK")
 HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}
 SKIP_MESSAGES = {"FOO-BAR"}
+
+
+@dataclass
+class BitFieldInfo:
+    name: str
+    bits: int
+
+
+@dataclass
+class FieldInfo:
+    name: str
+    pytype: str | None = None
+    ctype: str = "uint8_t"
+    arr_size: int = 0
+    size: int = 0
+    is_scaled: bool = False
+    is_bitfield: bool = False
+    is_repeating: bool = False
+    is_reserved: bool = False
+    scale_factor: Any = None
+    bit_fields: list[BitFieldInfo] = field(default_factory=list)
+    repeat_count: int | str | None = None
+    nested_fields: list["FieldInfo"] = field(default_factory=list)
 
 # ---------------------------------------------------------------------------
 # Type mapping: Python type string -> C++ type
@@ -207,86 +231,75 @@ def cpp_field_decl(ctype: str, name: str, arr_size: int = 0) -> str:
         return f"{ctype} {name}[{arr_size}];"
     return f"{ctype} {name};"
 
-def find_bitfield_subfield(fields, subfield_name):
+def find_bitfield_subfield(fields: list[FieldInfo], subfield_name):
     """Find a bitfield containing a named sub-field and return its C++ extraction expression.
     Returns None if not found in any bitfield."""
     for f in fields:
-        if f["is_bitfield"] and f["bit_fields"]:
+        if f.is_bitfield and f.bit_fields:
             offset = 0
-            for bf in f["bit_fields"]:
-                if bf["name"] == subfield_name:
-                    bits = bf["bits"]
-                    total_bits = f.get("size", 4) * 8
+            for bf in f.bit_fields:
+                if bf.name == subfield_name:
+                    bits = bf.bits
+                    total_bits = f.size * 8
                     if offset == 0 and bits == total_bits:
-                        return f"this->{f['name']}"
+                        return f"this->{f.name}"
                     elif bits <= 31:
                         mask = (1 << bits) - 1
-                        return f"((int)((this->{f['name']} >> {offset}) & 0x{mask:x}))"
+                        return f"((int)((this->{f.name} >> {offset}) & 0x{mask:x}))"
                     else:
-                        return f"this->{f['name']}"
-                offset += bf["bits"]
+                        return f"this->{f.name}"
+                offset += bf.bits
     return None
 
 # ---------------------------------------------------------------------------
 # Payload definition parser
 # ---------------------------------------------------------------------------
 
-def parse_payload_def(payload_def: dict) -> List[Dict]:
+def parse_payload_def(payload_def: dict) -> list[FieldInfo]:
     """
     Parse a UBX_PAYLOADS_GET payload definition into a flat list of fields.
     """
     fields = []
     for field_name, field_type in payload_def.items():
-        info: Dict[str, Any] = {
-            "name": field_name,
-            "pytype": None,
-            "ctype": "uint8_t",    # base C type (no array brackets)
-            "arr_size": 0,          # >0 if array
-            "size": 0,
-            "is_scaled": False,
-            "is_bitfield": False,
-            "is_repeating": False,
-            "is_reserved": bool(re.match(r'reserved\d*', field_name)),
-            "scale_factor": None,
-            "bit_fields": [],
-            "repeat_count": None,
-            "nested_fields": [],
-        }
+        info = FieldInfo(
+            name=field_name,
+            is_reserved=bool(re.match(r'reserved\d*', field_name)),
+        )
 
         if isinstance(field_type, str):
-            info["pytype"] = field_type
-            info["ctype"] = get_c_type_decl(field_type)
-            info["size"] = get_field_size(field_type)
-            info["arr_size"] = info["size"] if is_array_type(field_type) else 0
+            info.pytype = field_type
+            info.ctype = get_c_type_decl(field_type)
+            info.size = get_field_size(field_type)
+            info.arr_size = info.size if is_array_type(field_type) else 0
 
         elif isinstance(field_type, list):
             raw_type = field_type[0]
             scale = field_type[1]
-            info["pytype"] = raw_type
-            info["ctype"] = get_c_type_decl(raw_type)
-            info["size"] = get_field_size(raw_type)
-            info["arr_size"] = info["size"] if is_array_type(raw_type) else 0
-            info["is_scaled"] = True
-            info["scale_factor"] = scale
+            info.pytype = raw_type
+            info.ctype = get_c_type_decl(raw_type)
+            info.size = get_field_size(raw_type)
+            info.arr_size = info.size if is_array_type(raw_type) else 0
+            info.is_scaled = True
+            info.scale_factor = scale
 
         elif isinstance(field_type, tuple):
             numr = field_type[0]
             nested = field_type[1]
 
             if isinstance(numr, str) and numr.startswith("X"):
-                info["is_bitfield"] = True
-                info["pytype"] = numr
-                info["ctype"] = get_c_type_decl(numr)
-                info["size"] = get_field_size(numr)
-                info["arr_size"] = info["size"] if is_array_type(numr) else 0
+                info.is_bitfield = True
+                info.pytype = numr
+                info.ctype = get_c_type_decl(numr)
+                info.size = get_field_size(numr)
+                info.arr_size = info.size if is_array_type(numr) else 0
                 for k, v in nested.items():
                     m = re.match(r'[UXI](\d+)', str(v))
-                    info["bit_fields"].append({"name": k, "bits": int(m.group(1)) if m else 1})
+                    info.bit_fields.append(BitFieldInfo(k, int(m.group(1)) if m else 1))
             else:
-                info["is_repeating"] = True
-                info["nested_fields"] = parse_payload_def(nested)
-                info["repeat_count"] = numr
-                info["size"] = sum(f.get("size", 0) for f in info["nested_fields"])
+                info.is_repeating = True
+                info.nested_fields = parse_payload_def(nested)
+                info.repeat_count = numr
+                info.size = sum(f.size for f in info.nested_fields)
         else:
             raise TypeError(f"Unknown field type {type(field_type)} for {field_name}: {field_type!r}")
 
@@ -296,8 +309,8 @@ def parse_payload_def(payload_def: dict) -> List[Dict]:
 
 def is_fixed_size(fields):
     for f in fields:
-        if f["is_repeating"]:
-            rc = f["repeat_count"]
+        if f.is_repeating:
+            rc = f.repeat_count
             if rc is None or rc == "None" or isinstance(rc, str):
                 return False
     return True
@@ -305,14 +318,14 @@ def is_fixed_size(fields):
 def compute_struct_size(fields):
     total = 0
     for f in fields:
-        if f["is_repeating"]:
-            rc = f["repeat_count"]
+        if f.is_repeating:
+            rc = f.repeat_count
             if isinstance(rc, int):
-                total += f["size"] * rc
+                total += f.size * rc
             else:
                 return 0
         else:
-            total += f["size"]
+            total += f.size
     return total
 
 # ---------------------------------------------------------------------------
@@ -349,6 +362,12 @@ def should_generate_dump_case(msg_name, ubx_payloads):
 
 
 def write_output(path, content):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            if f.read() == content:
+                print(f"Unchanged: {path}")
+                return
+
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"Wrote: {path}")
@@ -362,26 +381,26 @@ def gen_struct_inner(fields, struct_tag, indent=1):
     lines = []
     tab = "\t" * indent
     for f in fields:
-        if f["is_repeating"] and isinstance(f["repeat_count"], int):
-            inner_name = f"{struct_tag}_{f['name']}"
-            lines.append(f"{tab}// {f['name']} x {f['repeat_count']}")
+        if f.is_repeating and isinstance(f.repeat_count, int):
+            inner_name = f"{struct_tag}_{f.name}"
+            lines.append(f"{tab}// {f.name} x {f.repeat_count}")
             lines.append(f"{tab}struct {inner_name}")
             lines.append(f"{tab}{{")
-            for nf in f["nested_fields"]:
-                if nf["is_repeating"] and isinstance(nf["repeat_count"], int):
-                    inner2_name = f"{inner_name}_{nf['name']}"
+            for nf in f.nested_fields:
+                if nf.is_repeating and isinstance(nf.repeat_count, int):
+                    inner2_name = f"{inner_name}_{nf.name}"
                     lines.append(f"{tab}\tstruct {inner2_name}")
                     lines.append(f"{tab}\t{{")
-                    for nf2 in nf["nested_fields"]:
-                        lines.append(f"{tab}\t\t{cpp_field_decl(nf2['ctype'], nf2['name'], nf2['arr_size'])}")
-                    lines.append(f"{tab}\t}} {nf['name']}[{nf['repeat_count']}];")
+                    for nf2 in nf.nested_fields:
+                        lines.append(f"{tab}\t\t{cpp_field_decl(nf2.ctype, nf2.name, nf2.arr_size)}")
+                    lines.append(f"{tab}\t}} {nf.name}[{nf.repeat_count}];")
                 else:
-                    lines.append(f"{tab}\t{cpp_field_decl(nf['ctype'], nf['name'], nf['arr_size'])}")
-            lines.append(f"{tab}}} {f['name']}[{f['repeat_count']}];")
-        elif f["is_repeating"]:
+                    lines.append(f"{tab}\t{cpp_field_decl(nf.ctype, nf.name, nf.arr_size)}")
+            lines.append(f"{tab}}} {f.name}[{f.repeat_count}];")
+        elif f.is_repeating:
             pass  # variable repeating group - skip in struct
         else:
-            lines.append(f"{tab}{cpp_field_decl(f['ctype'], f['name'], f['arr_size'])}")
+            lines.append(f"{tab}{cpp_field_decl(f.ctype, f.name, f.arr_size)}")
     return lines
 
 
@@ -420,42 +439,42 @@ def generate_parser_header(msg_name, fields, ubx_class):
     else:
         # Declare scalar/array fields for variable-size messages
         for f in fields:
-            if f["is_repeating"]:
+            if f.is_repeating:
                 continue
-            decl = cpp_field_decl(f['ctype'], f['name'], f['arr_size'])
+            decl = cpp_field_decl(f.ctype, f.name, f.arr_size)
             lines.append(f"\t{decl}")
         lines.append("\tbool valid;")
 
     # Variable repeating group -> vector
     has_vector = False
     for f in fields:
-        if f["is_repeating"] and not isinstance(f["repeat_count"], int):
-            nest_struct = f"{struct}_{f['name']}_t"
+        if f.is_repeating and not isinstance(f.repeat_count, int):
+            nest_struct = f"{struct}_{f.name}_t"
             lines.append(f"\tstruct {nest_struct}")
             lines.append("\t{")
-            for nf in f["nested_fields"]:
-                if nf["is_repeating"] and isinstance(nf["repeat_count"], int):
-                    inner_inner = f"{nest_struct}_{nf['name']}"
+            for nf in f.nested_fields:
+                if nf.is_repeating and isinstance(nf.repeat_count, int):
+                    inner_inner = f"{nest_struct}_{nf.name}"
                     lines.append(f"\t\tstruct {inner_inner}")
                     lines.append("\t\t{")
-                    for nf2 in nf["nested_fields"]:
-                        lines.append(f"\t\t\t{cpp_field_decl(nf2['ctype'], nf2['name'], nf2['arr_size'])}")
-                    lines.append(f"\t\t}} {nf['name']}[{nf['repeat_count']}];")
+                    for nf2 in nf.nested_fields:
+                        lines.append(f"\t\t\t{cpp_field_decl(nf2.ctype, nf2.name, nf2.arr_size)}")
+                    lines.append(f"\t\t}} {nf.name}[{nf.repeat_count}];")
                 else:
-                    lines.append(f"\t\t{cpp_field_decl(nf['ctype'], nf['name'], nf['arr_size'])}")
+                    lines.append(f"\t\t{cpp_field_decl(nf.ctype, nf.name, nf.arr_size)}")
             lines.append(f"\t}};")
-            lines.append(f"\tvector<{nest_struct}> {f['name']};")
+            lines.append(f"\tvector<{nest_struct}> {f.name};")
             has_vector = True
     # Fixed repeating groups in variable-size messages -> struct array
     if not fixed:
         for f in fields:
-            if f["is_repeating"] and isinstance(f["repeat_count"], int):
-                inner_name = f"{struct}_{f['name']}"
+            if f.is_repeating and isinstance(f.repeat_count, int):
+                inner_name = f"{struct}_{f.name}"
                 lines.append(f"\tstruct {inner_name}")
                 lines.append("\t{")
-                for nf in f["nested_fields"]:
-                    lines.append(f"\t\t{cpp_field_decl(nf['ctype'], nf['name'], nf['arr_size'])}")
-                lines.append(f"\t}} {f['name']}[{f['repeat_count']}];")
+                for nf in f.nested_fields:
+                    lines.append(f"\t\t{cpp_field_decl(nf.ctype, nf.name, nf.arr_size)}")
+                lines.append(f"\t}} {f.name}[{f.repeat_count}];")
 
     if has_vector and not fixed:
         lines.append("")
@@ -479,19 +498,19 @@ def generate_parser_header(msg_name, fields, ubx_class):
 
 def is_multi_byte_scalar(f):
     """Check if a field is a multi-byte scalar (needs endian conversion)."""
-    if f["is_repeating"] or f["is_reserved"]:
+    if f.is_repeating or f.is_reserved:
         return False
-    if not f["pytype"]:
+    if not f.pytype:
         return False
-    if is_array_type(f["pytype"]):
+    if is_array_type(f.pytype):
         return False
-    if f["size"] <= 1:
+    if f.size <= 1:
         return False
-    return f["size"] in (2, 4, 8)
+    return f.size in (2, 4, 8)
 
 
 def needs_endian_field(f):
-    return is_multi_byte_scalar(f) and f["pytype"][:4] in ENDIAN_CONVERT_TYPES
+    return is_multi_byte_scalar(f) and f.pytype[:4] in ENDIAN_CONVERT_TYPES
 
 
 def bounds_check_line(size_expr, tab):
@@ -500,19 +519,19 @@ def bounds_check_line(size_expr, tab):
 
 def gen_read_field(f, prefix, tab):
     """Generate bounds-checked code to read one scalar/array field."""
-    lines = [bounds_check_line(f["size"], tab)]
+    lines = [bounds_check_line(f.size, tab)]
 
-    if needs_getter(f["pytype"]) and not is_array_type(f["pytype"]):
-        func = get_getter_func(f["pytype"])
-        lines.append(f"{tab}{prefix}{f['name']} = {func}(frame.payload, off);")
+    if needs_getter(f.pytype) and not is_array_type(f.pytype):
+        func = get_getter_func(f.pytype)
+        lines.append(f"{tab}{prefix}{f.name} = {func}(frame.payload, off);")
     else:
-        sz = f["size"]
-        lines.append(f"{tab}memcpy(&{prefix}{f['name']}, frame.payload.data() + off, {sz});")
+        sz = f.size
+        lines.append(f"{tab}memcpy(&{prefix}{f.name}, frame.payload.data() + off, {sz});")
         if needs_endian_field(f):
-            func = ENDIAN_CONVERT_TYPES[f["pytype"][:4]]
-            lines.append(f"{tab}{prefix}{f['name']} = {func}({prefix}{f['name']});")
+            func = ENDIAN_CONVERT_TYPES[f.pytype[:4]]
+            lines.append(f"{tab}{prefix}{f.name} = {func}({prefix}{f.name});")
 
-    lines.append(f"{tab}off += {f['size']};")
+    lines.append(f"{tab}off += {f.size};")
     return lines
 
 
@@ -537,21 +556,21 @@ def generate_parser_impl(msg_name, fields, ubx_class):
         lines.append("\tmemset(&this->data, 0, sizeof(this->data));")
     else:
         for f in fields:
-            if f["is_repeating"] and not isinstance(f["repeat_count"], int):
+            if f.is_repeating and not isinstance(f.repeat_count, int):
                 continue  # handled below
-            if f["is_repeating"]:
-                lines.append(f"\tmemset(&this->{f['name']}, 0, sizeof(this->{f['name']}));")
+            if f.is_repeating:
+                lines.append(f"\tmemset(&this->{f.name}, 0, sizeof(this->{f.name}));")
                 continue
-            if f["pytype"] is None:
+            if f.pytype is None:
                 continue
-            pt = f["pytype"]
+            pt = f.pytype
             if is_array_type(pt):
-                lines.append(f"\tmemset(&this->{f['name']}, 0, sizeof(this->{f['name']}));")
+                lines.append(f"\tmemset(&this->{f.name}, 0, sizeof(this->{f.name}));")
             else:
-                lines.append(f"\tthis->{f['name']} = 0;")
+                lines.append(f"\tthis->{f.name} = 0;")
     for f in fields:
-        if f["is_repeating"] and not isinstance(f["repeat_count"], int):
-            lines.append(f"\tthis->{f['name']}.clear();")
+        if f.is_repeating and not isinstance(f.repeat_count, int):
+            lines.append(f"\tthis->{f.name}.clear();")
     lines.append("\tthis->valid = false;")
     lines.append("}")
     lines.append("")
@@ -578,7 +597,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
         lines.append("")
 
         # Endianness for top-level multi-byte scalars (not reserved, not arrays)
-        scalar_conv = [(f"data.{f['name']}", f["pytype"]) for f in fields
+        scalar_conv = [(f"data.{f.name}", f.pytype) for f in fields
                        if needs_endian_field(f)]
         if scalar_conv:
             lines.append("\t// Endianness conversion")
@@ -588,28 +607,28 @@ def generate_parser_impl(msg_name, fields, ubx_class):
 
         # Fixed repeating groups with endianness
         for f in fields:
-            if f["is_repeating"] and isinstance(f["repeat_count"], int):
-                conv_nf = [nf for nf in f["nested_fields"] if needs_endian_field(nf)]
-                conv_nested_rg = [nf for nf in f["nested_fields"]
-                                  if nf["is_repeating"] and isinstance(nf["repeat_count"], int)]
+            if f.is_repeating and isinstance(f.repeat_count, int):
+                conv_nf = [nf for nf in f.nested_fields if needs_endian_field(nf)]
+                conv_nested_rg = [nf for nf in f.nested_fields
+                                  if nf.is_repeating and isinstance(nf.repeat_count, int)]
                 if conv_nf:
-                    lines.append(f"\tfor(int i = 0; i < {f['repeat_count']}; i++)")
+                    lines.append(f"\tfor(int i = 0; i < {f.repeat_count}; i++)")
                     lines.append("\t{")
                     for nf in conv_nf:
-                        func = ENDIAN_CONVERT_TYPES[nf["pytype"][:4]]
-                        lines.append(f"\t\tdata.{f['name']}[i].{nf['name']} = {func}(data.{f['name']}[i].{nf['name']});")
+                        func = ENDIAN_CONVERT_TYPES[nf.pytype[:4]]
+                        lines.append(f"\t\tdata.{f.name}[i].{nf.name} = {func}(data.{f.name}[i].{nf.name});")
                     lines.append("\t}")
                 if conv_nested_rg:
                     for nf in conv_nested_rg:
-                        conv_nf2 = [nf2 for nf2 in nf["nested_fields"] if needs_endian_field(nf2)]
+                        conv_nf2 = [nf2 for nf2 in nf.nested_fields if needs_endian_field(nf2)]
                         if conv_nf2:
-                            lines.append(f"\tfor(int i = 0; i < {f['repeat_count']}; i++)")
+                            lines.append(f"\tfor(int i = 0; i < {f.repeat_count}; i++)")
                             lines.append("\t{")
-                            lines.append(f"\t\tfor(int j = 0; j < {nf['repeat_count']}; j++)")
+                            lines.append(f"\t\tfor(int j = 0; j < {nf.repeat_count}; j++)")
                             lines.append("\t\t{")
                             for nf2 in conv_nf2:
-                                func = ENDIAN_CONVERT_TYPES[nf2["pytype"][:4]]
-                                lines.append(f"\t\t\tdata.{f['name']}[i].{nf['name']}[j].{nf2['name']} = {func}(data.{f['name']}[i].{nf['name']}[j].{nf2['name']});")
+                                func = ENDIAN_CONVERT_TYPES[nf2.pytype[:4]]
+                                lines.append(f"\t\t\tdata.{f.name}[i].{nf.name}[j].{nf2.name} = {func}(data.{f.name}[i].{nf.name}[j].{nf2.name});")
                             lines.append("\t\t}")
                             lines.append("\t}")
     else:
@@ -617,40 +636,40 @@ def generate_parser_impl(msg_name, fields, ubx_class):
         lines.append("\tsize_t off = 0;")
         lines.append("")
         for f in fields:
-            if f["is_repeating"]:
-                rc = f["repeat_count"]
-                elem_sz = f["size"]
+            if f.is_repeating:
+                rc = f.repeat_count
+                elem_sz = f.size
                 if not elem_sz:
-                    elem_sz = sum(g.get("size", 0) for g in f["nested_fields"])
-                nest_type = f"{struct}_{f['name']}_t"
+                    elem_sz = sum(g.size for g in f.nested_fields)
+                nest_type = f"{struct}_{f.name}_t"
 
                 if rc == "None" or rc is None:
-                    lines.append(f"\t// repeating group: {f['name']}")
+                    lines.append(f"\t// repeating group: {f.name}")
                     lines.append(f"\twhile(off + {elem_sz} <= frame.length)")
                     lines.append("\t{")
                     lines.append(f"\t\t{nest_type} item;")
-                    lines.extend(gen_read_fields(f["nested_fields"], "item.", "\t\t"))
-                    lines.append(f"\t\tthis->{f['name']}.push_back(item);")
+                    lines.extend(gen_read_fields(f.nested_fields, "item.", "\t\t"))
+                    lines.append(f"\t\tthis->{f.name}.push_back(item);")
                     lines.append("\t}")
                 elif isinstance(rc, str):
                     # Repeat count may be a top-level field or a bitfield sub-field
                     count_expr = find_bitfield_subfield(fields, rc)
                     if count_expr is None:
                         count_expr = f"this->{rc}"
-                    lines.append(f"\t// repeating group: {f['name']} x {count_expr}")
+                    lines.append(f"\t// repeating group: {f.name} x {count_expr}")
                     lines.append(f"\tfor(int i = 0; i < {count_expr}; i++)")
                     lines.append("\t{")
                     lines.append(f"\t\t{nest_type} item;")
-                    lines.extend(gen_read_fields(f["nested_fields"], "item.", "\t\t"))
-                    lines.append(f"\t\tthis->{f['name']}.push_back(item);")
+                    lines.extend(gen_read_fields(f.nested_fields, "item.", "\t\t"))
+                    lines.append(f"\t\tthis->{f.name}.push_back(item);")
                     lines.append("\t}")
                 elif isinstance(rc, int):
-                    lines.append(f"\t// fixed repeating group: {f['name']} x {rc}")
+                    lines.append(f"\t// fixed repeating group: {f.name} x {rc}")
                     lines.append(f"\tfor(int i = 0; i < {rc}; i++)")
                     lines.append("\t{")
-                    lines.extend(gen_read_fields(f["nested_fields"], f"this->{f['name']}[i].", "\t\t"))
+                    lines.extend(gen_read_fields(f.nested_fields, f"this->{f.name}[i].", "\t\t"))
                     lines.append("\t}")
-            elif f["is_bitfield"]:
+            elif f.is_bitfield:
                 lines.extend(gen_read_field(f, "this->", "\t"))
             else:
                 lines.extend(gen_read_field(f, "this->", "\t"))
@@ -678,43 +697,43 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     lines.append(f'\tfprintf(fp, "({msg_name}");')
     if fixed:
         for f in fields:
-            if f["is_reserved"]:
+            if f.is_reserved:
                 continue
-            if f["is_repeating"] and isinstance(f["repeat_count"], int):
-                lines.append(f'\tfprintf(fp, ", {f["name"]}=%zu items x %zu bytes", (size_t){f["repeat_count"]}, (size_t){f["size"]});')
-            elif f["is_bitfield"]:
-                pt = f["pytype"][:4]
+            if f.is_repeating and isinstance(f.repeat_count, int):
+                lines.append(f'\tfprintf(fp, ", {f.name}=%zu items x %zu bytes", (size_t){f.repeat_count}, (size_t){f.size});')
+            elif f.is_bitfield:
+                pt = f.pytype[:4]
                 fmt_prefix, fmt_macro = printf_format(pt)
                 if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}" {fmt_macro}, data.{f["name"]});')
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, data.{f.name});')
                 else:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}", data.{f["name"]});')
-            elif not f["is_repeating"] and f["pytype"]:
-                pt = f["pytype"][:4]
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", data.{f.name});')
+            elif not f.is_repeating and f.pytype:
+                pt = f.pytype[:4]
                 fmt_prefix, fmt_macro = printf_format(pt)
                 if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}" {fmt_macro}, data.{f["name"]});')
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, data.{f.name});')
                 elif fmt_prefix:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}", data.{f["name"]});')
-                elif is_array_type(f["pytype"]):
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}=%zu bytes", sizeof(data.{f["name"]}));')
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", data.{f.name});')
+                elif is_array_type(f.pytype):
+                    lines.append(f'\tfprintf(fp, ", {f.name}=%zu bytes", sizeof(data.{f.name}));')
     else:
         for f in fields:
-            if f["is_reserved"]:
+            if f.is_reserved:
                 continue
-            if f["is_repeating"] and not isinstance(f["repeat_count"], int):
-                lines.append(f'\tfprintf(fp, ", {f["name"]}=%zu items", this->{f["name"]}.size());')
-            elif f["is_repeating"] and isinstance(f["repeat_count"], int):
+            if f.is_repeating and not isinstance(f.repeat_count, int):
+                lines.append(f'\tfprintf(fp, ", {f.name}=%zu items", this->{f.name}.size());')
+            elif f.is_repeating and isinstance(f.repeat_count, int):
                 continue
-            elif not f["is_repeating"] and f["pytype"]:
-                pt = f["pytype"][:4]
+            elif not f.is_repeating and f.pytype:
+                pt = f.pytype[:4]
                 fmt_prefix, fmt_macro = printf_format(pt)
                 if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}" {fmt_macro}, this->{f["name"]});')
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, this->{f.name});')
                 elif fmt_prefix:
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}={fmt_prefix}", this->{f["name"]});')
-                elif is_array_type(f["pytype"]):
-                    lines.append(f'\tfprintf(fp, ", {f["name"]}=%zu bytes", sizeof(this->{f["name"]}));')
+                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", this->{f.name});')
+                elif is_array_type(f.pytype):
+                    lines.append(f'\tfprintf(fp, ", {f.name}=%zu bytes", sizeof(this->{f.name}));')
     lines.append('\tfputs(")\\n", fp);')
     lines.append("}")
     lines.append("")
@@ -726,11 +745,11 @@ def gen_read_fields(fields, prefix, tab):
     """Generate code to read fields from payload at offset `off`."""
     lines = []
     for f in fields:
-        if f["is_repeating"] and isinstance(f["repeat_count"], int):
-            lines.append(f"{tab}// nested fixed rg {f['name']} x {f['repeat_count']}")
-            lines.append(f"{tab}for(int j = 0; j < {f['repeat_count']}; j++)")
+        if f.is_repeating and isinstance(f.repeat_count, int):
+            lines.append(f"{tab}// nested fixed rg {f.name} x {f.repeat_count}")
+            lines.append(f"{tab}for(int j = 0; j < {f.repeat_count}; j++)")
             lines.append(f"{tab}{{")
-            lines.extend(gen_read_fields(f["nested_fields"], f"{prefix}{f['name']}[j].", tab + "\t"))
+            lines.extend(gen_read_fields(f.nested_fields, f"{prefix}{f.name}[j].", tab + "\t"))
             lines.append(f"{tab}}}")
         else:
             lines.extend(gen_read_field(f, prefix, tab))
