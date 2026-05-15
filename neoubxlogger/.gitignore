@@ -1,5 +1,7 @@
 neoubxlogger
 *.o
+*.d
 *.ubx
+.ubx_codegen.stamp
 *_gen.cpp
 *_gen.hpp
