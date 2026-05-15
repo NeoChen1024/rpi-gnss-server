@@ -19,7 +19,7 @@ import os
 import re
 import sys
 from collections import OrderedDict
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -28,6 +28,10 @@ RAWLOGGER_DIR = os.path.join(PROJECT_DIR, "neoubxlogger")
 # Path to pyubx2 types modules
 PYUBX2_DIR = os.path.join(PROJECT_DIR, "3rdparty", "pyubx2", "src")
 sys.path.insert(0, PYUBX2_DIR)
+
+TARGET_CLASSES = ("NAV", "RXM", "MON", "TIM", "ESF", "HNR", "LOG", "SEC", "CFG", "ACK")
+HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}
+SKIP_MESSAGES = {"FOO-BAR"}
 
 # ---------------------------------------------------------------------------
 # Type mapping: Python type string -> C++ type
@@ -62,6 +66,9 @@ ENDIAN_CONVERT_TYPES = {
     "I008": "le64toh",
     "E002": "le16toh",
     "E004": "le32toh",
+    "X002": "le16toh",
+    "X004": "le32toh",
+    "X008": "le64toh",
 }
 
 GETTER_FUNCS = {
@@ -76,6 +83,9 @@ GETTER_FUNCS = {
     "E001": "getu1",
     "E002": "getu2",
     "E004": "getu4",
+    "X001": "getu1",
+    "X002": "getu2",
+    "X004": "getu4",
 }
 
 PRINTF_MACRO = {
@@ -321,6 +331,28 @@ def msg_id_const(msg_name):
 def class_id_const(cls: str):
     return "UBX_CLASS_" + cls.upper()
 
+
+def is_generated_msg_name(msg_name):
+    return msg_name not in SKIP_MESSAGES and not msg_name.startswith("UBX-")
+
+
+def should_generate_parser(msg_name, ubx_payloads):
+    return msg_name in ubx_payloads and is_generated_msg_name(msg_name) and msg_name not in HAND_WRITTEN
+
+
+def should_generate_struct(msg_name, ubx_payloads):
+    return should_generate_parser(msg_name, ubx_payloads)
+
+
+def should_generate_dump_case(msg_name, ubx_payloads):
+    return msg_name in ubx_payloads and is_generated_msg_name(msg_name)
+
+
+def write_output(path, content):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"Wrote: {path}")
+
 # ---------------------------------------------------------------------------
 # Struct generation
 # ---------------------------------------------------------------------------
@@ -348,8 +380,6 @@ def gen_struct_inner(fields, struct_tag, indent=1):
             lines.append(f"{tab}}} {f['name']}[{f['repeat_count']}];")
         elif f["is_repeating"]:
             pass  # variable repeating group - skip in struct
-        elif f["is_bitfield"]:
-            lines.append(f"{tab}{cpp_field_decl(f['ctype'], f['name'], f['arr_size'])}")
         else:
             lines.append(f"{tab}{cpp_field_decl(f['ctype'], f['name'], f['arr_size'])}")
     return lines
@@ -449,7 +479,7 @@ def generate_parser_header(msg_name, fields, ubx_class):
 
 def is_multi_byte_scalar(f):
     """Check if a field is a multi-byte scalar (needs endian conversion)."""
-    if f["is_repeating"] or f["is_bitfield"] or f["is_reserved"]:
+    if f["is_repeating"] or f["is_reserved"]:
         return False
     if not f["pytype"]:
         return False
@@ -462,6 +492,28 @@ def is_multi_byte_scalar(f):
 
 def needs_endian_field(f):
     return is_multi_byte_scalar(f) and f["pytype"][:4] in ENDIAN_CONVERT_TYPES
+
+
+def bounds_check_line(size_expr, tab):
+    return f"{tab}if(off > frame.length || (size_t)({size_expr}) > frame.length - off) return false;"
+
+
+def gen_read_field(f, prefix, tab):
+    """Generate bounds-checked code to read one scalar/array field."""
+    lines = [bounds_check_line(f["size"], tab)]
+
+    if needs_getter(f["pytype"]) and not is_array_type(f["pytype"]):
+        func = get_getter_func(f["pytype"])
+        lines.append(f"{tab}{prefix}{f['name']} = {func}(frame.payload, off);")
+    else:
+        sz = f["size"]
+        lines.append(f"{tab}memcpy(&{prefix}{f['name']}, frame.payload.data() + off, {sz});")
+        if needs_endian_field(f):
+            func = ENDIAN_CONVERT_TYPES[f["pytype"][:4]]
+            lines.append(f"{tab}{prefix}{f['name']} = {func}({prefix}{f['name']});")
+
+    lines.append(f"{tab}off += {f['size']};")
+    return lines
 
 
 def generate_parser_impl(msg_name, fields, ubx_class):
@@ -488,13 +540,12 @@ def generate_parser_impl(msg_name, fields, ubx_class):
             if f["is_repeating"] and not isinstance(f["repeat_count"], int):
                 continue  # handled below
             if f["is_repeating"]:
-                continue  # fixed rg are in data struct
+                lines.append(f"\tmemset(&this->{f['name']}, 0, sizeof(this->{f['name']}));")
+                continue
             if f["pytype"] is None:
                 continue
             pt = f["pytype"]
-            if pt == "U001" or pt == "U002" or pt == "U004" or pt == "I001" or pt == "I002" or pt == "I004" or pt == "R004" or pt == "R008" or pt == "X001" or pt == "X002" or pt == "X004" or pt == "X008":
-                lines.append(f"\tthis->{f['name']} = 0;")
-            elif is_array_type(pt):
+            if is_array_type(pt):
                 lines.append(f"\tmemset(&this->{f['name']}, 0, sizeof(this->{f['name']}));")
             else:
                 lines.append(f"\tthis->{f['name']} = 0;")
@@ -508,7 +559,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     # parse()
     lines.append(f"bool {cls}::parse(ubx_frame &frame)")
     lines.append("{")
-    lines.append("\tthis->valid = false;")
+    lines.append("\tthis->clear();")
     lines.append("\tif(!frame.valid) return false;")
     lines.append("")
     cc = class_id_const(ubx_class)
@@ -597,49 +648,17 @@ def generate_parser_impl(msg_name, fields, ubx_class):
                     lines.append(f"\t// fixed repeating group: {f['name']} x {rc}")
                     lines.append(f"\tfor(int i = 0; i < {rc}; i++)")
                     lines.append("\t{")
-                    for nf in f["nested_fields"]:
-                        if nf["is_repeating"] and isinstance(nf["repeat_count"], int):
-                            lines.append(f"\t\t// nested rg: {nf['name']} x {nf['repeat_count']}")
-                            lines.append(f"\t\tfor(int j = 0; j < {nf['repeat_count']}; j++)")
-                            lines.append("\t\t{")
-                            for nf2 in nf["nested_fields"]:
-                                if needs_getter(nf2["pytype"]) and not is_array_type(nf2["pytype"]):
-                                    func = get_getter_func(nf2["pytype"])
-                                    lines.append(f"\t\t\tthis->{f['name']}[i].{nf['name']}[j].{nf2['name']} = {func}(frame.payload, off);")
-                                else:
-                                    lines.append(f"\t\t\tmemcpy(&this->{f['name']}[i].{nf['name']}[j].{nf2['name']}, frame.payload.data() + off, {nf2['size']});")
-                                lines.append(f"\t\t\toff += {nf2['size']};")
-                            lines.append("\t\t}")
-                        else:
-                            if needs_getter(nf["pytype"]) and not is_array_type(nf["pytype"]):
-                                func = get_getter_func(nf["pytype"])
-                                lines.append(f"\t\tthis->{f['name']}[i].{nf['name']} = {func}(frame.payload, off);")
-                            else:
-                                lines.append(f"\t\tmemcpy(&this->{f['name']}[i].{nf['name']}, frame.payload.data() + off, {nf['size']});")
-                            lines.append(f"\t\toff += {nf['size']};")
+                    lines.extend(gen_read_fields(f["nested_fields"], f"this->{f['name']}[i].", "\t\t"))
                     lines.append("\t}")
             elif f["is_bitfield"]:
-                fi = f["bit_fields"]
-                if f["size"] <= 4 and not is_array_type(f["pytype"]):
-                    func = get_getter_func(f["pytype"])
-                    lines.append(f"\tthis->{f['name']} = {func}(frame.payload, off);")
-                else:
-                    lines.append(f"\tmemcpy(&this->{f['name']}, frame.payload.data() + off, {f['size']});")
-                lines.append(f"\toff += {f['size']};")
+                lines.extend(gen_read_field(f, "this->", "\t"))
             else:
-                if needs_getter(f["pytype"]) and not is_array_type(f["pytype"]):
-                    func = get_getter_func(f["pytype"])
-                    lines.append(f"\tthis->{f['name']} = {func}(frame.payload, off);")
-                else:
-                    lines.append(f"\tmemcpy(&this->{f['name']}, frame.payload.data() + off, {f['size']});")
-                if needs_endian_field(f):
-                    # Avoid endian-converting reserved fields (they're byte arrays or padding)
-                    if not f["is_reserved"]:
-                        func = ENDIAN_CONVERT_TYPES[f["pytype"][:4]]
-                        lines.append(f"\tthis->{f['name']} = {func}(this->{f['name']});")
-                lines.append(f"\toff += {f['size']};")
+                lines.extend(gen_read_field(f, "this->", "\t"))
 
     lines.append("")
+    if not fixed:
+        lines.append("\tif(off != frame.length) return false;")
+        lines.append("")
     lines.append("\tif(validate()) { this->valid = true; return true; }")
     lines.append("\telse { return false; }")
     lines.append("}")
@@ -708,21 +727,13 @@ def gen_read_fields(fields, prefix, tab):
     lines = []
     for f in fields:
         if f["is_repeating"] and isinstance(f["repeat_count"], int):
-            lines.append(f"{tab}// nested fixed rg {f['name']} x {f['repeat_count']} (in item)")
-        elif needs_getter(f["pytype"]) and not is_array_type(f["pytype"]):
-            func = get_getter_func(f["pytype"])
-            lines.append(f"{tab}{prefix}{f['name']} = {func}(frame.payload, off);")
-            if needs_endian_field(f) and not f["is_reserved"]:
-                func2 = ENDIAN_CONVERT_TYPES[f["pytype"][:4]]
-                lines.append(f"{tab}{prefix}{f['name']} = {func2}({prefix}{f['name']});")
-            lines.append(f"{tab}off += {f['size']};")
+            lines.append(f"{tab}// nested fixed rg {f['name']} x {f['repeat_count']}")
+            lines.append(f"{tab}for(int j = 0; j < {f['repeat_count']}; j++)")
+            lines.append(f"{tab}{{")
+            lines.extend(gen_read_fields(f["nested_fields"], f"{prefix}{f['name']}[j].", tab + "\t"))
+            lines.append(f"{tab}}}")
         else:
-            sz = f["size"]
-            lines.append(f"{tab}memcpy(&{prefix}{f['name']}, frame.payload.data() + off, {sz});")
-            if needs_endian_field(f) and not f["is_reserved"]:
-                func = ENDIAN_CONVERT_TYPES[f["pytype"][:4]]
-                lines.append(f"{tab}{prefix}{f['name']} = {func}({prefix}{f['name']});")
-            lines.append(f"{tab}off += {sz};")
+            lines.extend(gen_read_field(f, prefix, tab))
     return lines
 
 
@@ -791,7 +802,7 @@ HEADER = """/*
 """
 
 
-def write_struct_file(class_msgs, ubx_payloads, hand_written):
+def write_struct_file(class_msgs, ubx_payloads):
     lines = [HEADER]
     lines.append('#include <cstddef>')
     lines.append('#include <cstdint>')
@@ -805,7 +816,7 @@ def write_struct_file(class_msgs, ubx_payloads, hand_written):
     lines.append("")
     for msgs in class_msgs.values():
         for msg_name, _, _ in msgs:
-            if msg_name not in ubx_payloads or msg_name in hand_written:
+            if not should_generate_struct(msg_name, ubx_payloads):
                 continue
             payload = ubx_payloads[msg_name]
             fields = parse_payload_def(payload)
@@ -833,7 +844,7 @@ def write_parser_file(class_name, msgs, ubx_payloads):
     lines.append("using std::vector;")
     lines.append("")
     for msg_name, _, _ in msgs:
-        if msg_name not in ubx_payloads or msg_name == "FOO-BAR":
+        if not should_generate_parser(msg_name, ubx_payloads):
             continue
         payload = ubx_payloads[msg_name]
         fields = parse_payload_def(payload)
@@ -860,7 +871,7 @@ def write_parser_impl_file(class_name, msgs, ubx_payloads):
     lines.append("{")
     lines.append("")
     for msg_name, _, _ in msgs:
-        if msg_name not in ubx_payloads or msg_name == "FOO-BAR":
+        if not should_generate_parser(msg_name, ubx_payloads):
             continue
         payload = ubx_payloads[msg_name]
         fields = parse_payload_def(payload)
@@ -890,7 +901,6 @@ def write_dump_gen_header():
 
 
 def write_dump_gen_impl(class_msgs, target_classes, ubx_payloads):
-    HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}
     lines = [HEADER]
     lines.append('#include "ubx_dump_gen.hpp"')
     lines.append('#include "ubx_ids_gen.hpp"')
@@ -915,7 +925,7 @@ def write_dump_gen_impl(class_msgs, target_classes, ubx_payloads):
             continue
         msgs = class_msgs[cls_name]
         valid = [(n, c, i) for n, c, i in msgs
-                 if n in ubx_payloads and n != "FOO-BAR" and not n.startswith("UBX-")]
+                 if should_generate_dump_case(n, ubx_payloads)]
         if not valid:
             continue
         cc = class_id_const(cls_name)
@@ -964,7 +974,7 @@ def write_ids_file(class_msgs, target_classes):
         lines.append(f"constexpr uint8_t {cc} = 0x{cls_id:02x};")
         lines.append("")
         for msg_name, _, msg_id in msgs:
-            if msg_name.startswith("UBX-") or msg_name == "FOO-BAR":
+            if not is_generated_msg_name(msg_name):
                 continue
             mc = msg_id_const(msg_name)
             lines.append(f"constexpr uint8_t {mc} = 0x{msg_id:02x};")
@@ -986,22 +996,15 @@ def main():
 
     os.makedirs(RAWLOGGER_DIR, exist_ok=True)
 
-    TARGET_CLASSES = ["NAV", "RXM", "MON", "TIM", "ESF", "HNR", "LOG", "SEC", "CFG", "ACK"]
-    HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}
-
     # Generate ID constants
     ids_content = write_ids_file(class_msgs, TARGET_CLASSES)
     p = os.path.join(RAWLOGGER_DIR, "ubx_ids_gen.hpp")
-    with open(p, 'w') as f:
-        f.write(ids_content)
-    print(f"Wrote: {p}")
+    write_output(p, ids_content)
 
     # Generate structs
-    struct_content = write_struct_file(class_msgs, UBX_PAYLOADS_GET, HAND_WRITTEN)
+    struct_content = write_struct_file(class_msgs, UBX_PAYLOADS_GET)
     p = os.path.join(RAWLOGGER_DIR, "ubx_struct_gen.hpp")
-    with open(p, 'w') as f:
-        f.write(struct_content)
-    print(f"Wrote: {p}")
+    write_output(p, struct_content)
 
     # Generate parser files for interesting classes
     for cls_name in TARGET_CLASSES:
@@ -1010,36 +1013,26 @@ def main():
         msgs = class_msgs[cls_name]
         # Messages that have hand-written parsers -> skip duplication
         valid = [(n, c, i) for n, c, i in msgs
-                 if n in UBX_PAYLOADS_GET and n != "FOO-BAR"
-                 and not n.startswith("UBX-")
-                 and n not in HAND_WRITTEN]
+                 if should_generate_parser(n, UBX_PAYLOADS_GET)]
         if not valid:
             continue
 
         hpp = write_parser_file(cls_name, valid, UBX_PAYLOADS_GET)
         hp = os.path.join(RAWLOGGER_DIR, f"ubx_{cls_name.lower()}_gen.hpp")
-        with open(hp, 'w') as f:
-            f.write(hpp)
-        print(f"Wrote: {hp}")
+        write_output(hp, hpp)
 
         cpp = write_parser_impl_file(cls_name, valid, UBX_PAYLOADS_GET)
         cp = os.path.join(RAWLOGGER_DIR, f"ubx_{cls_name.lower()}_gen.cpp")
-        with open(cp, 'w') as f:
-            f.write(cpp)
-        print(f"Wrote: {cp}")
+        write_output(cp, cpp)
 
     # Generate universal dump function
     dump_hpp = write_dump_gen_header()
     dp = os.path.join(RAWLOGGER_DIR, "ubx_dump_gen.hpp")
-    with open(dp, 'w') as f:
-        f.write(dump_hpp)
-    print(f"Wrote: {dp}")
+    write_output(dp, dump_hpp)
 
     dump_cpp = write_dump_gen_impl(class_msgs, TARGET_CLASSES, UBX_PAYLOADS_GET)
     dp = os.path.join(RAWLOGGER_DIR, "ubx_dump_gen.cpp")
-    with open(dp, 'w') as f:
-        f.write(dump_cpp)
-    print(f"Wrote: {dp}")
+    write_output(dp, dump_cpp)
 
     print("\nDone.")
 
