@@ -5,3 +5,4 @@ neoubxlogger
 .ubx_codegen.stamp
 *_gen.cpp
 *_gen.hpp
+/tests/test_ubx

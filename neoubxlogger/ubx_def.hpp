@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Kelei Chen
 
-#include <string>
-#include <vector>
-#include <map>
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cstddef>
-#include <stdint.h>
+#include <concepts>
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <source_location>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 #include "ubx_ids_gen.hpp"
 
@@ -28,17 +38,44 @@ constexpr uint8_t UBX_CKSUM_SIZE	= 2;
 typedef vector<uint8_t> ubx_buf_t;
 typedef map<uint8_t, string> ubx_name_map_t;
 
-// x1 x2 x4 -> u1 u2 u4
+template<typename T>
+concept UbxScalar =
+	(std::integral<T> || std::floating_point<T>) &&
+	(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8);
 
-uint8_t getu1(ubx_buf_t &buf, size_t offset);
-uint16_t getu2(ubx_buf_t &buf, size_t offset);
-uint32_t getu4(ubx_buf_t &buf, size_t offset);
-int8_t geti1(ubx_buf_t &buf, size_t offset);
-int16_t geti2(ubx_buf_t &buf, size_t offset);
-int32_t geti4(ubx_buf_t &buf, size_t offset);
-float getr4(ubx_buf_t &buf, size_t offset);
-double getr8(ubx_buf_t &buf, size_t offset);
-uint8_t getch(ubx_buf_t &buf, size_t offset);
+template<UbxScalar T>
+T little_to_native(T value)
+{
+	if constexpr(sizeof(T) == 1 || std::endian::native == std::endian::little)
+	{
+		return value;
+	}
+	else
+	{
+		static_assert(std::endian::native == std::endian::big,
+			"mixed-endian targets are not supported");
+		auto bytes = std::bit_cast<std::array<uint8_t, sizeof(T)>>(value);
+		std::reverse(bytes.begin(), bytes.end());
+		return std::bit_cast<T>(bytes);
+	}
+}
+
+template<UbxScalar T>
+T read_le(std::span<const uint8_t> payload, size_t offset)
+{
+	if(offset > payload.size() || sizeof(T) > payload.size() - offset)
+		throw std::out_of_range("UBX scalar exceeds payload bounds");
+
+	std::array<uint8_t, sizeof(T)> bytes{};
+	std::copy_n(payload.begin() + offset, sizeof(T), bytes.begin());
+	if constexpr(std::endian::native == std::endian::big && sizeof(T) > 1)
+		std::reverse(bytes.begin(), bytes.end());
+	return std::bit_cast<T>(bytes);
+}
+
+void report_parse_error(
+	std::string_view detail,
+	std::source_location location = std::source_location::current());
 
 class ubx_frame
 {
@@ -53,12 +90,12 @@ public:
 	bool valid;
 
 	ubx_frame();
-	ubx_frame(ubx_buf_t &buf);
+	ubx_frame(std::span<const uint8_t> buf);
 	void clear();
-	void dump(FILE *fp);
-	int write(FILE *fp);
+	void dump(FILE *fp) const;
+	int write(FILE *fp) const;
 private:
-	bool validate(ubx_buf_t &buf);
+	bool validate(std::span<const uint8_t> buf);
 };
 
 class ubx_any_msg
@@ -70,10 +107,10 @@ public:
 	ubx_buf_t payload;
 
 	ubx_any_msg();
-	ubx_any_msg(ubx_frame &frame);
-	bool parse(ubx_frame &frame);
+	ubx_any_msg(const ubx_frame &frame);
+	bool parse(const ubx_frame &frame);
 	void clear();
-	void dump(FILE *fp);
+	void dump(FILE *fp) const;
 };
 
 } // namespace UBX

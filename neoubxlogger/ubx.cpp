@@ -3,71 +3,19 @@
 
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <stdio.h>
 #include "ubx.hpp"
-#include <endian.h>
 
 namespace UBX
 {
 using std::string;
 
-uint8_t getu1(ubx_buf_t &buf, size_t offset)
+void report_parse_error(std::string_view detail, std::source_location location)
 {
-	return buf.at(offset);
-}
-
-uint16_t getu2(ubx_buf_t &buf, size_t offset)
-{
-	return buf.at(offset) | (buf.at(offset + 1) << 8);
-}
-
-uint32_t getu4(ubx_buf_t &buf, size_t offset)
-{
-	return
-		 buf.at(offset) |
-		(buf.at(offset + 1) << 8) |
-		(buf.at(offset + 2) << 16) |
-		(buf.at(offset + 3) << 24);
-}
-
-int8_t geti1(ubx_buf_t &buf, size_t offset)
-{
-	return buf.at(offset);
-}
-
-int16_t geti2(ubx_buf_t &buf, size_t offset)
-{
-	return buf.at(offset) | (buf.at(offset + 1) << 8);
-}
-
-int32_t geti4(ubx_buf_t &buf, size_t offset)
-{
-	return
-		 buf.at(offset) |
-		(buf.at(offset + 1) << 8) |
-		(buf.at(offset + 2) << 16) |
-		(buf.at(offset + 3) << 24);
-}
-
-float getr4(ubx_buf_t &buf, size_t offset)
-{
-	uint32_t tmp = getu4(buf, offset);
-	float result;
-	memcpy(&result, &tmp, sizeof(result));
-	return result;
-}
-
-double getr8(ubx_buf_t &buf, size_t offset)
-{
-	uint64_t tmp = getu4(buf, offset) | ((uint64_t)getu4(buf, offset + 4) << 32);
-	double result;
-	memcpy(&result, &tmp, sizeof(result));
-	return result;
-}
-
-uint8_t getch(ubx_buf_t &buf, size_t offset)
-{
-	return getu1(buf, offset);
+	auto message = std::format("{}:{} {}: {}\n",
+		location.file_name(), location.line(), location.function_name(), detail);
+	fputs(message.c_str(), stderr);
 }
 
 void ubx_frame::clear()
@@ -85,10 +33,10 @@ ubx_frame::ubx_frame()
 	clear();
 }
 
-ubx_frame::ubx_frame(ubx_buf_t &buf)
+ubx_frame::ubx_frame(std::span<const uint8_t> buf)
 {
 	clear();
-	if (buf.size() < 8)
+	if (buf.size() < UBX_HEADER_SIZE + UBX_CKSUM_SIZE)
 	{
 		return;
 	}
@@ -103,16 +51,17 @@ ubx_frame::ubx_frame(ubx_buf_t &buf)
 	this->payload = ubx_buf_t(buf.begin() + UBX_HEADER_SIZE, buf.end() - UBX_CKSUM_SIZE);
 }
 
-bool ubx_frame::validate(ubx_buf_t &buf)
+bool ubx_frame::validate(std::span<const uint8_t> buf)
 {
-	if(buf.size() < 8)
+	if(buf.size() < UBX_HEADER_SIZE + UBX_CKSUM_SIZE)
 	{
-		fputs("ubx_frame::validate(): buf.size() < 8\n", stderr);
+		report_parse_error("frame is shorter than header and checksum");
 		return false;
 	}
 	if(buf.size() != (size_t)this->length + UBX_HEADER_SIZE + UBX_CKSUM_SIZE)
 	{
-		fprintf(stderr, "ubx_frame::validate(): buf.size() = %zd, length = %d\n", buf.size(), this->length);
+		report_parse_error(std::format("buffer size {} does not match payload length {}",
+			buf.size(), this->length));
 		return false;
 	}
 	uint8_t ck_a = 0, ck_b = 0;
@@ -124,14 +73,15 @@ bool ubx_frame::validate(ubx_buf_t &buf)
 	uint16_t buf_cksum = (ck_a << 8) | ck_b;
 	if(buf_cksum != this->cksum)
 	{
-		fprintf(stderr, "ubx_frame::validate(): buf_cksum = %04x, cksum = %04x\n", buf_cksum, this->cksum);
+		report_parse_error(std::format("checksum {:04x} does not match {:04x}",
+			buf_cksum, this->cksum));
 		return false;
 	}
 
 	return true;
 }
 
-void ubx_frame::dump(FILE *fp)
+void ubx_frame::dump(FILE *fp) const
 {
 	fprintf(fp, "=========\n");
 	fprintf(fp, "class_id: %02x\n", this->class_id);
@@ -149,22 +99,24 @@ void ubx_frame::dump(FILE *fp)
 
 // Returns EOF on error
 // TODO: make it more elegant
-int ubx_frame::write(FILE *fp)
+int ubx_frame::write(FILE *fp) const
 {
-	int ret = 0;
-	ret |= fputc(UBX_SYNC1, fp);
-	ret |= fputc(UBX_SYNC2, fp);
-	ret |= fputc(this->class_id, fp);
-	ret |= fputc(this->msg_id, fp);
-	ret |= fputc(this->length & 0xff, fp);
-	ret |= fputc((this->length >> 8) & 0xff, fp);
+	if(fputc(UBX_SYNC1, fp) == EOF ||
+	   fputc(UBX_SYNC2, fp) == EOF ||
+	   fputc(this->class_id, fp) == EOF ||
+	   fputc(this->msg_id, fp) == EOF ||
+	   fputc(this->length & 0xff, fp) == EOF ||
+	   fputc((this->length >> 8) & 0xff, fp) == EOF)
+		return EOF;
 	for(size_t i = 0; i < this->payload.size(); i++)
 	{
-		ret |= fputc(this->payload[i], fp);
+		if(fputc(this->payload[i], fp) == EOF)
+			return EOF;
 	}
-	ret |= fputc(this->cksum >> 8, fp);
-	ret |= fputc(this->cksum & 0xff, fp);
-	return ret;
+	if(fputc(this->cksum >> 8, fp) == EOF ||
+	   fputc(this->cksum & 0xff, fp) == EOF)
+		return EOF;
+	return 0;
 }
 
 ubx_any_msg::ubx_any_msg()
@@ -172,7 +124,7 @@ ubx_any_msg::ubx_any_msg()
 	clear();
 }
 
-ubx_any_msg::ubx_any_msg(ubx_frame &frame)
+ubx_any_msg::ubx_any_msg(const ubx_frame &frame)
 {
 	parse(frame);
 }
@@ -185,8 +137,9 @@ void ubx_any_msg::clear()
 	this->payload.clear();
 }
 
-bool ubx_any_msg::parse(ubx_frame &frame)
+bool ubx_any_msg::parse(const ubx_frame &frame)
 {
+	clear();
 	if(frame.valid == false)
 	{
 		return false;
@@ -195,10 +148,11 @@ bool ubx_any_msg::parse(ubx_frame &frame)
 	this->class_id = frame.class_id;
 	this->msg_id = frame.msg_id;
 	this->payload = frame.payload;
+	this->valid = true;
 	return true;
 }
 
-void ubx_any_msg::dump(FILE *fp)
+void ubx_any_msg::dump(FILE *fp) const
 {
 	fprintf(fp, "%s (%zd)\t> ",
 		("UBX-" + ubx_msg_name(this->class_id, this->msg_id)).c_str(),

@@ -13,7 +13,6 @@
 
 #include "ubx_def.hpp"
 #include "ubx_names.hpp"
-#include "ubx_struct.hpp"
 #include "ubx_nav.hpp"
 
 #pragma once

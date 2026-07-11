@@ -1,41 +1,27 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Kelei Chen
 
-#include "ubx_def.hpp"
-#include "ubx_struct.hpp"
-
 #pragma once
+
+#include "ubx_nav_gen.hpp"
+
+#include <cstdio>
+#include <string>
 
 namespace UBX
 {
-class ubx_nav_pvt : public ubx_any_msg
-{
-public:
-	struct _ubx_nav_pvt data;
-	bool valid;
 
-	ubx_nav_pvt();
-	ubx_nav_pvt(ubx_frame &frame);
-	bool parse(ubx_frame &frame);
-	void clear();
-	void dump(FILE *fp);
-	string get_fix_type();
-private:
-	bool validate();
-};
+// Generated parser validity only covers frame identity, payload length and
+// structural decoding. These helpers apply application-level NAV semantics.
+bool ubx_nav_pvt_semantically_valid(const ubx_nav_pvt &pvt);
+bool ubx_nav_eoe_semantically_valid(const ubx_nav_eoe &eoe);
 
-class ubx_nav_eoe : public ubx_any_msg
-{
-	public:
-	bool valid;
-	uint32_t iTOW;
+std::string ubx_nav_pvt_fix_type(const ubx_nav_pvt &pvt);
 
-	ubx_nav_eoe();
-	ubx_nav_eoe(ubx_frame &frame);
-	bool parse(ubx_frame &frame);
-	void clear();
-	void dump(FILE *fp);
-private:
-	bool validate();
-};
-};
+void ubx_nav_pvt_dump(const ubx_nav_pvt &pvt, FILE *fp);
+void ubx_nav_eoe_dump(const ubx_nav_eoe &eoe, FILE *fp);
+
+// Returns true when the frame is a NAV message with a custom dump function.
+bool ubx_nav_dump_custom(const ubx_frame &frame, FILE *fp);
+
+} // namespace UBX

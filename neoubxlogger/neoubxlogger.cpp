@@ -23,85 +23,102 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <ctime>
+#include <format>
 
 #define RETURN_ERR \
 	return 1
 
 using namespace UBX;
 
-#define CHAR_CHECK(wasted)				\
-	if(c == EOF)					\
-	{						\
-		return c;				\
-	}						\
-	if(c == UBX_SYNC1)				\
-	{						\
-		if(fgetc(fp) == UBX_SYNC2)		\
-		{					\
-			ungetc(UBX_SYNC2, fp);		\
-			wasted_bytes += (wasted);	\
-			goto resync_sync2;		\
-		}					\
-	}						\
-
-
-int ubx_read_frame(FILE *fp, ubx_buf_t &buf)
+enum class ReadResult
 {
-	int c = 0;
-	size_t length = 0;
-	size_t wasted_bytes = 0;
-	// Read until we get a sync char
-resync:
-	while (1)
-	{
-		c = fgetc(fp);
-		if (c == EOF)
-		{
-			return c;
-		}
-		if (c == 0xb5)
-		{
-			break;
-		}
-		wasted_bytes++;
-	}
-	// Get SYNC2
-resync_sync2:
-	if(fgetc(fp) != 0x62)
-	{
-		goto resync;
-	}
-	buf.clear();
-	if(wasted_bytes > 0)
-	{
-		fprintf(stderr, "ubx_read_frame(): WASTED %zd Bytes\n", wasted_bytes);
-	}
-	// Get class_id & msg_id
-	buf.push_back(c = fgetc(fp));
-	CHAR_CHECK(1);
-	buf.push_back(c = fgetc(fp));
-	CHAR_CHECK(2);
-	// Get length
-	buf.push_back(c = fgetc(fp));
-	CHAR_CHECK(3);
-	length = c & 0xff; // LSB
-	buf.push_back(c = fgetc(fp));
-	CHAR_CHECK(4);
-	length |= (c << 8) & 0xff00; // MSB
+	ok,
+	end,
+	timeout,
+	error,
+};
 
-	// Now we know the length, read the payload & checksum
-	for(size_t i = 0; i < length + 2; i++)
-	{
-		buf.push_back(c = fgetc(fp));
-		if(c == EOF)
-		{
-			return c;
-		}
-	}
-	return c;
+struct ByteReadResult
+{
+	ReadResult result;
+	uint8_t byte = 0;
+};
+
+using read_byte_fn = ByteReadResult (*)(void *context);
+
+static ByteReadResult file_read_byte(void *context)
+{
+	FILE *fp = static_cast<FILE *>(context);
+	int c = fgetc(fp);
+	if(c != EOF)
+		return {.result = ReadResult::ok, .byte = static_cast<uint8_t>(c)};
+	return {.result = feof(fp) ? ReadResult::end : ReadResult::error};
 }
 
-void print_status_line(ubx_nav_pvt &pvt)
+static ByteReadResult tcp_read_byte(void *context)
+{
+	int fd = *static_cast<int *>(context);
+	unsigned char c;
+	while(true)
+	{
+		ssize_t n = read(fd, &c, 1);
+		if(n == 1) return {.result = ReadResult::ok, .byte = c};
+		if(n == 0) return {.result = ReadResult::end};
+		if(errno == EINTR) continue;
+		if(errno == EAGAIN || errno == EWOULDBLOCK)
+			return {.result = ReadResult::timeout};
+		return {.result = ReadResult::error};
+	}
+}
+
+static ReadResult read_ubx_frame(void *context, read_byte_fn read_byte, ubx_buf_t &buf)
+{
+	bool have_sync1 = false;
+	size_t wasted_bytes = 0;
+
+	while(true)
+	{
+		auto read_result = read_byte(context);
+		if(read_result.result != ReadResult::ok) return read_result.result;
+		uint8_t c = read_result.byte;
+		if(!have_sync1)
+		{
+			have_sync1 = c == UBX_SYNC1;
+			if(!have_sync1) wasted_bytes++;
+			continue;
+		}
+		if(c == UBX_SYNC2) break;
+
+		// The previous SYNC1 was noise. Retain a new SYNC1 so B5 B5 62
+		// resynchronizes at the second byte instead of dropping the frame.
+		wasted_bytes++;
+		have_sync1 = c == UBX_SYNC1;
+		if(!have_sync1) wasted_bytes++;
+	}
+
+	buf.clear();
+	if(wasted_bytes > 0)
+		fprintf(stderr, "read_ubx_frame(): WASTED %zd Bytes\n", wasted_bytes);
+
+	for(size_t i = 0; i < UBX_HEADER_SIZE; i++)
+	{
+		auto read_result = read_byte(context);
+		if(read_result.result != ReadResult::ok) return read_result.result;
+		buf.push_back(read_result.byte);
+	}
+
+	size_t length = size_t(buf[UBX_LENGTH_OFFSET]) |
+		(size_t(buf[UBX_LENGTH_OFFSET + 1]) << 8);
+	for(size_t i = 0; i < length + UBX_CKSUM_SIZE; i++)
+	{
+		auto read_result = read_byte(context);
+		if(read_result.result != ReadResult::ok) return read_result.result;
+		buf.push_back(read_result.byte);
+	}
+	return ReadResult::ok;
+}
+
+void print_status_line(const ubx_nav_pvt &pvt)
 {
 	char buf[128];
 	fputc('\r', stderr);
@@ -109,11 +126,12 @@ void print_status_line(ubx_nav_pvt &pvt)
 		buf[i] = ' ';
 	buf[80] = '\0';
 	fputs(buf, stderr);
-	fprintf(stderr, "\riTOW=%06u.%03u %10s %04u/%02hhu/%02hhu %02hhu:%02hhu:%02hhu, Sats: %02hhu",
+	auto status = std::format("\riTOW={:06}.{:03} {:>10} {:04}/{:02}/{:02} {:02}:{:02}:{:02}, Sats: {:02}",
 		pvt.data.iTOW / 1000, pvt.data.iTOW % 1000,
-		pvt.get_fix_type().c_str(),
-		pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.sec,
+		ubx_nav_pvt_fix_type(pvt).c_str(),
+		pvt.data.year, pvt.data.month, pvt.data.day, pvt.data.hour, pvt.data.min, pvt.data.second,
 		pvt.data.numSV);
+	fputs(status.c_str(), stderr);
 }
 
 static int tcp_connect(const char *host, int port)
@@ -139,7 +157,7 @@ static int tcp_connect(const char *host, int port)
 		sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 		if(sockfd < 0) continue;
 
-		struct timeval tv = {5, 0};
+		struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
 		setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
 		if(connect(sockfd, rp->ai_addr, rp->ai_addrlen) == 0)
@@ -150,53 +168,6 @@ static int tcp_connect(const char *host, int port)
 
 	freeaddrinfo(res);
 	return sockfd;
-}
-
-static int tcp_read_byte(int fd)
-{
-	unsigned char c;
-	ssize_t n = read(fd, &c, 1);
-	if(n == 1) return c;
-	return EOF;
-}
-
-static int ubx_read_frame_tcp(int fd, ubx_buf_t &buf)
-{
-	int c;
-	size_t length = 0;
-	size_t wasted_bytes = 0;
-
-resync:
-	while((c = tcp_read_byte(fd)) != EOF)
-	{
-		if(c == UBX_SYNC1) break;
-		wasted_bytes++;
-	}
-	if(c == EOF) return EOF;
-
-	if(tcp_read_byte(fd) != UBX_SYNC2) goto resync;
-
-	buf.clear();
-	if(wasted_bytes > 0)
-		fprintf(stderr, "ubx_read_frame(): WASTED %zd Bytes\n", wasted_bytes);
-
-	for(int i = 0; i < 4; i++)
-	{
-		c = tcp_read_byte(fd);
-		if(c == EOF) return EOF;
-		buf.push_back(c);
-	}
-
-	length = (size_t)buf[2] | ((size_t)buf[3] << 8);
-
-	for(size_t i = 0; i < length + 2; i++)
-	{
-		c = tcp_read_byte(fd);
-		if(c == EOF) return EOF;
-		buf.push_back(c);
-	}
-
-	return c;
 }
 
 struct Stats
@@ -216,13 +187,17 @@ static void print_stats(Stats &st, time_t now)
 	if(st.period_pvt > 0)
 	{
 		int pct = (int)(st.period_fix * 100 / st.period_pvt);
-		fprintf(stderr, "\n[neoubxlogger stats] avg rate: %.1f KiB/s, frames: %lu, FIX %d%%\n",
-			rate, (unsigned long)st.period_frames, pct);
+		auto message = std::format(
+			"\n[neoubxlogger stats] avg rate: {:.1f} KiB/s, frames: {}, FIX {}%\n",
+			rate, st.period_frames, pct);
+		fputs(message.c_str(), stderr);
 	}
 	else
 	{
-		fprintf(stderr, "\n[neoubxlogger stats] avg rate: %.1f KiB/s, frames: %lu, FIX ---%%\n",
-			rate, (unsigned long)st.period_frames);
+		auto message = std::format(
+			"\n[neoubxlogger stats] avg rate: {:.1f} KiB/s, frames: {}, FIX ---%\n",
+			rate, st.period_frames);
+		fputs(message.c_str(), stderr);
 	}
 	st.last_print = now;
 	st.period_bytes = 0;
@@ -244,7 +219,7 @@ int main(int argc, char *argv[])
 	int tcp_port = 0;
 	int sockfd = -1;
 
-	Stats stats;
+	Stats stats{.last_print = time(NULL)};
 
 	setvbuf(stderr, NULL, _IONBF, 0);
 
@@ -314,7 +289,6 @@ int main(int argc, char *argv[])
 
 	ubx_nav_pvt current_pvt, last_pvt;
 	time_t stats_next = time(NULL) + 60;
-	stats.last_print = time(NULL);
 
 	while(1)
 	{
@@ -322,9 +296,12 @@ int main(int argc, char *argv[])
 
 		if(tcp_mode)
 		{
-			int ret = ubx_read_frame_tcp(sockfd, buf);
-			if(ret == EOF)
+			ReadResult ret = read_ubx_frame(&sockfd, tcp_read_byte, buf);
+			if(ret == ReadResult::timeout)
+				continue;
+			if(ret != ReadResult::ok)
 			{
+				if(ret == ReadResult::error) perror("TCP read");
 				fprintf(stderr, "\nTCP %s:%d: connection lost, reconnecting in 2s...\n",
 					tcp_host.c_str(), tcp_port);
 				close(sockfd);
@@ -340,8 +317,13 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
-			if(ubx_read_frame(readin, buf) == EOF)
-				break;
+			ReadResult ret = read_ubx_frame(readin, file_read_byte, buf);
+			if(ret == ReadResult::end) break;
+			if(ret != ReadResult::ok)
+			{
+				perror("UBX input");
+				RETURN_ERR;
+			}
 		}
 
 		ubx_frame frame(buf);
@@ -352,14 +334,17 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
-		if(writeout != NULL)
-			frame.write(writeout);
+		if(writeout != NULL && frame.write(writeout) == EOF)
+		{
+			perror("UBX output");
+			RETURN_ERR;
+		}
 
-		if(debug)
+		if(debug && !ubx_nav_dump_custom(frame, stderr))
 			ubx_dump_any(frame, stderr);
 
 		ubx_nav_pvt pvt(frame);
-		if(pvt.valid)
+		if(ubx_nav_pvt_semantically_valid(pvt))
 		{
 			stats.period_pvt++;
 			if(pvt.data.fixType >= 2) stats.period_fix++;
@@ -368,49 +353,49 @@ int main(int argc, char *argv[])
 		}
 
 		ubx_nav_eoe eoe(frame);
-		if(eoe.valid)
+		if(ubx_nav_eoe_semantically_valid(eoe))
 		{
-			if(eoe.iTOW != current_pvt.data.iTOW)
+			if(!current_pvt.valid)
 			{
-				fprintf(stderr, "\nEOE iTOW mismatch! %u != %u\n", eoe.iTOW, last_pvt.data.iTOW);
+				fprintf(stderr, "\nIgnoring NAV-EOE without a valid NAV-PVT\n");
 			}
-
-			if(!quiet) fputs(" EOE", stderr);
-
-			if((writeout == NULL || current_pvt.data.day != last_pvt.data.day) && !no_write)
+			else
 			{
-				if(writeout != NULL)
-					fclose(writeout);
-				char dirname[64];
-				if(current_pvt.data.month != last_pvt.data.month)
+				if(eoe.data.iTOW != current_pvt.data.iTOW)
 				{
-					snprintf(dirname, 64, "%04u-%02hhu", current_pvt.data.year, current_pvt.data.month);
-					if(mkdir(dirname, 0755) != 0)
+					fprintf(stderr, "\nEOE iTOW mismatch! %u != %u\n", eoe.data.iTOW, current_pvt.data.iTOW);
+				}
+
+				if(!quiet) fputs(" EOE", stderr);
+
+				if((writeout == NULL || current_pvt.data.day != last_pvt.data.day) && !no_write)
+				{
+					if(writeout != NULL)
+						fclose(writeout);
+					char dirname[64];
+					snprintf(dirname, sizeof(dirname), "%04u-%02hhu",
+						current_pvt.data.year, current_pvt.data.month);
+					if(mkdir(dirname, 0755) != 0 && errno != EEXIST)
 					{
-						if(errno != EEXIST)
-						{
-							perror(dirname);
-							RETURN_ERR;
-						}
+						perror(dirname);
+						RETURN_ERR;
+					}
+					char filename[128];
+					snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
+						dirname,
+						current_pvt.data.year, current_pvt.data.month, current_pvt.data.day, current_pvt.data.hour, current_pvt.data.min, current_pvt.data.second);
+					writeout = fopen(filename, "wb");
+					if(writeout == NULL)
+					{
+						fprintf(stderr, "Unable to open file %s!\n", filename);
+						RETURN_ERR;
 					}
 					if(!quiet)
-						fprintf(stderr, "\nCreated directory %s\n", dirname);
+						fprintf(stderr, "\nOpened file %s\n", filename);
 				}
-				char filename[128];
-				snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
-					dirname,
-					current_pvt.data.year, current_pvt.data.month, current_pvt.data.day, current_pvt.data.hour, current_pvt.data.min, current_pvt.data.sec);
-				writeout = fopen(filename, "wb");
-				if(writeout == NULL)
-				{
-					fprintf(stderr, "Unable to open file %s!\n", filename);
-					RETURN_ERR;
-				}
-				if(!quiet)
-					fprintf(stderr, "\nOpened file %s\n", filename);
-			}
 
-			last_pvt = current_pvt;
+				last_pvt = current_pvt;
+			}
 		}
 
 		stats.period_bytes += 8 + frame.length;

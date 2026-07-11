@@ -31,7 +31,6 @@ PYUBX2_DIR = os.path.join(PROJECT_DIR, "3rdparty", "pyubx2", "src")
 sys.path.insert(0, PYUBX2_DIR)
 
 TARGET_CLASSES = ("NAV", "RXM", "MON", "TIM", "ESF", "HNR", "LOG", "SEC", "CFG", "ACK")
-HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}
 SKIP_MESSAGES = {"FOO-BAR"}
 
 
@@ -81,78 +80,17 @@ SPECIAL_TYPES = {
     "E004": "uint32_t",
 }
 
-ENDIAN_CONVERT_TYPES = {
-    "U002": "le16toh",
-    "U004": "le32toh",
-    "U008": "le64toh",
-    "I002": "le16toh",
-    "I004": "le32toh",
-    "I008": "le64toh",
-    "E002": "le16toh",
-    "E004": "le32toh",
-    "X002": "le16toh",
-    "X004": "le32toh",
-    "X008": "le64toh",
-}
-
-GETTER_FUNCS = {
-    "U001": "getu1",
-    "U002": "getu2",
-    "U004": "getu4",
-    "I001": "geti1",
-    "I002": "geti2",
-    "I004": "geti4",
-    "R004": "getr4",
-    "R008": "getr8",
-    "E001": "getu1",
-    "E002": "getu2",
-    "E004": "getu4",
-    "X001": "getu1",
-    "X002": "getu2",
-    "X004": "getu4",
-}
-
-PRINTF_MACRO = {
-    "U001": "PRIu8",
-    "U002": "PRIu16",
-    "U004": "PRIu32",
-    "U008": "PRIu64",
-    "I001": "PRId8",
-    "I002": "PRId16",
-    "I004": "PRId32",
-    "I008": "PRId64",
-    "X001": "PRIx8",
-    "X002": "PRIx16",
-    "X004": "PRIx32",
-    "X008": "PRIx64",
+ENDIAN_SCALAR_TYPES = {
+    "U002", "U004", "U008", "I002", "I004", "I008",
+    "E002", "E004", "X002", "X004", "X008", "R004", "R008",
 }
 
 X_HEX_WIDTH = {
-    "X001": "02",
-    "X002": "04",
-    "X004": "08",
-    "X008": "016",
+    "X001": 2,
+    "X002": 4,
+    "X004": 8,
+    "X008": 16,
 }
-
-def printf_format(pt):
-    """Return the printf format spec for a pytype.
-    
-    Returns (fmt_prefix, fmt_macro) where:
-      - fmt_prefix is the beginning of the format like "%" or "0x%02"
-      - fmt_macro is the PRI macro name (e.g. "PRIu32") or None for direct format
-    """
-    if pt == "R004":
-        return "%f", None
-    elif pt == "R008":
-        return "%lf", None
-    elif pt in PRINTF_MACRO:
-        macro = PRINTF_MACRO[pt]
-        if pt.startswith("X"):
-            w = X_HEX_WIDTH.get(pt, "02")
-            return f"0x%{w}", macro
-        else:
-            return "%", macro
-    return None, None
 
 # ---------------------------------------------------------------------------
 # Type info
@@ -209,21 +147,6 @@ def is_array_type(pytype: str) -> bool:
         return False
     info = parse_pytype(pytype)
     return info["is_array"]
-
-def needs_endian_convert(pytype: str) -> bool:
-    if pytype is None:
-        return False
-    return pytype[:4] in ENDIAN_CONVERT_TYPES
-
-def needs_getter(pytype: str) -> bool:
-    if pytype is None:
-        return False
-    return pytype[:4] in GETTER_FUNCS
-
-def get_getter_func(pytype: str) -> str:
-    if pytype is None:
-        return "getu1"
-    return GETTER_FUNCS.get(pytype[:4], "getu1")
 
 def cpp_field_decl(ctype: str, name: str, arr_size: int = 0) -> str:
     """Emit `type name;` or `type name[size];`"""
@@ -350,7 +273,7 @@ def is_generated_msg_name(msg_name):
 
 
 def should_generate_parser(msg_name, ubx_payloads):
-    return msg_name in ubx_payloads and is_generated_msg_name(msg_name) and msg_name not in HAND_WRITTEN
+    return msg_name in ubx_payloads and is_generated_msg_name(msg_name)
 
 
 def should_generate_struct(msg_name, ubx_payloads):
@@ -435,7 +358,6 @@ def generate_parser_header(msg_name, fields, ubx_class):
     lines.append("public:")
     if fixed:
         lines.append(f"\tstruct {struct} data;")
-        lines.append("\tbool valid;")
     else:
         # Declare scalar/array fields for variable-size messages
         for f in fields:
@@ -443,7 +365,6 @@ def generate_parser_header(msg_name, fields, ubx_class):
                 continue
             decl = cpp_field_decl(f.ctype, f.name, f.arr_size)
             lines.append(f"\t{decl}")
-        lines.append("\tbool valid;")
 
     # Variable repeating group -> vector
     has_vector = False
@@ -481,10 +402,10 @@ def generate_parser_header(msg_name, fields, ubx_class):
 
     lines.append("")
     lines.append(f"\t{cls}();")
-    lines.append(f"\t{cls}(ubx_frame &frame);")
-    lines.append(f"\tbool parse(ubx_frame &frame);")
+    lines.append(f"\t{cls}(const ubx_frame &frame);")
+    lines.append(f"\tbool parse(const ubx_frame &frame);")
     lines.append(f"\tvoid clear();")
-    lines.append(f"\tvoid dump(FILE *fp);")
+    lines.append(f"\tvoid dump(FILE *fp) const;")
     lines.append("")
     lines.append("private:")
     lines.append("\tbool validate();")
@@ -510,26 +431,24 @@ def is_multi_byte_scalar(f):
 
 
 def needs_endian_field(f):
-    return is_multi_byte_scalar(f) and f.pytype[:4] in ENDIAN_CONVERT_TYPES
-
-
-def bounds_check_line(size_expr, tab):
-    return f"{tab}if(off > frame.length || (size_t)({size_expr}) > frame.length - off) return false;"
+    return is_multi_byte_scalar(f) and f.pytype[:4] in ENDIAN_SCALAR_TYPES
 
 
 def gen_read_field(f, prefix, tab):
     """Generate bounds-checked code to read one scalar/array field."""
-    lines = [bounds_check_line(f.size, tab)]
+    lines = [
+        f"{tab}if(off > frame.length || size_t({f.size}) > frame.length - off)",
+        f"{tab}{{",
+        f'{tab}\treport_parse_error(std::format("field {f.name} at offset {{}} exceeds payload length {{}}", off, frame.length));',
+        f"{tab}\treturn false;",
+        f"{tab}}}",
+    ]
 
-    if needs_getter(f.pytype) and not is_array_type(f.pytype):
-        func = get_getter_func(f.pytype)
-        lines.append(f"{tab}{prefix}{f.name} = {func}(frame.payload, off);")
+    if not is_array_type(f.pytype):
+        lines.append(f"{tab}{prefix}{f.name} = read_le<{f.ctype}>(frame.payload, off);")
     else:
         sz = f.size
         lines.append(f"{tab}memcpy(&{prefix}{f.name}, frame.payload.data() + off, {sz});")
-        if needs_endian_field(f):
-            func = ENDIAN_CONVERT_TYPES[f.pytype[:4]]
-            lines.append(f"{tab}{prefix}{f.name} = {func}({prefix}{f.name});")
 
     lines.append(f"{tab}off += {f.size};")
     return lines
@@ -546,7 +465,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     # Constructor
     lines.append(f"{cls}::{cls}() {{ clear(); }}")
     lines.append("")
-    lines.append(f"{cls}::{cls}(ubx_frame &frame) {{ parse(frame); }}")
+    lines.append(f"{cls}::{cls}(const ubx_frame &frame) {{ parse(frame); }}")
     lines.append("")
 
     # clear()
@@ -576,7 +495,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     lines.append("")
 
     # parse()
-    lines.append(f"bool {cls}::parse(ubx_frame &frame)")
+    lines.append(f"bool {cls}::parse(const ubx_frame &frame)")
     lines.append("{")
     lines.append("\tthis->clear();")
     lines.append("\tif(!frame.valid) return false;")
@@ -589,7 +508,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     if fixed and total_sz > 0:
         lines.append(f"\tif(frame.length != sizeof(this->data))")
         lines.append("\t{")
-        lines.append(f"\t\tfprintf(stderr, \"{cls}::parse(): len %d != sizeof %zd\\n\", frame.length, sizeof(this->data));")
+        lines.append(f'\t\treport_parse_error(std::format("{cls}: length {{}} != expected {{}}", frame.length, sizeof(this->data)));')
         lines.append("\t\treturn false;")
         lines.append("\t}")
         lines.append("")
@@ -602,8 +521,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
         if scalar_conv:
             lines.append("\t// Endianness conversion")
             for path, pt in scalar_conv:
-                func = ENDIAN_CONVERT_TYPES[pt[:4]]
-                lines.append(f"\t{path} = {func}({path});")
+                lines.append(f"\t{path} = little_to_native({path});")
 
         # Fixed repeating groups with endianness
         for f in fields:
@@ -615,8 +533,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
                     lines.append(f"\tfor(int i = 0; i < {f.repeat_count}; i++)")
                     lines.append("\t{")
                     for nf in conv_nf:
-                        func = ENDIAN_CONVERT_TYPES[nf.pytype[:4]]
-                        lines.append(f"\t\tdata.{f.name}[i].{nf.name} = {func}(data.{f.name}[i].{nf.name});")
+                        lines.append(f"\t\tdata.{f.name}[i].{nf.name} = little_to_native(data.{f.name}[i].{nf.name});")
                     lines.append("\t}")
                 if conv_nested_rg:
                     for nf in conv_nested_rg:
@@ -627,8 +544,7 @@ def generate_parser_impl(msg_name, fields, ubx_class):
                             lines.append(f"\t\tfor(int j = 0; j < {nf.repeat_count}; j++)")
                             lines.append("\t\t{")
                             for nf2 in conv_nf2:
-                                func = ENDIAN_CONVERT_TYPES[nf2.pytype[:4]]
-                                lines.append(f"\t\t\tdata.{f.name}[i].{nf.name}[j].{nf2.name} = {func}(data.{f.name}[i].{nf.name}[j].{nf2.name});")
+                                lines.append(f"\t\t\tdata.{f.name}[i].{nf.name}[j].{nf2.name} = little_to_native(data.{f.name}[i].{nf.name}[j].{nf2.name});")
                             lines.append("\t\t}")
                             lines.append("\t}")
     else:
@@ -692,49 +608,43 @@ def generate_parser_impl(msg_name, fields, ubx_class):
     lines.append("")
 
     # dump()
-    lines.append(f"void {cls}::dump(FILE *fp)")
+    lines.append(f"void {cls}::dump(FILE *fp) const")
     lines.append("{")
-    lines.append(f'\tfprintf(fp, "({msg_name}");')
+    lines.append(f'\tstd::string output = "({msg_name}";')
     if fixed:
         for f in fields:
             if f.is_reserved:
                 continue
             if f.is_repeating and isinstance(f.repeat_count, int):
-                lines.append(f'\tfprintf(fp, ", {f.name}=%zu items x %zu bytes", (size_t){f.repeat_count}, (size_t){f.size});')
-            elif f.is_bitfield:
-                pt = f.pytype[:4]
-                fmt_prefix, fmt_macro = printf_format(pt)
-                if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, data.{f.name});')
-                else:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", data.{f.name});')
+                lines.append(f'\toutput += std::format(", {f.name}={{}} items x {{}} bytes", {f.repeat_count}, {f.size});')
             elif not f.is_repeating and f.pytype:
                 pt = f.pytype[:4]
-                fmt_prefix, fmt_macro = printf_format(pt)
-                if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, data.{f.name});')
-                elif fmt_prefix:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", data.{f.name});')
-                elif is_array_type(f.pytype):
-                    lines.append(f'\tfprintf(fp, ", {f.name}=%zu bytes", sizeof(data.{f.name}));')
+                if is_array_type(f.pytype):
+                    lines.append(f'\toutput += std::format(", {f.name}={{}} bytes", sizeof(data.{f.name}));')
+                elif pt.startswith("X"):
+                    width = X_HEX_WIDTH.get(pt, 2)
+                    lines.append(f'\toutput += std::format(", {f.name}=0x{{:0{width}x}}", +data.{f.name});')
+                else:
+                    lines.append(f'\toutput += std::format(", {f.name}={{}}", +data.{f.name});')
     else:
         for f in fields:
             if f.is_reserved:
                 continue
             if f.is_repeating and not isinstance(f.repeat_count, int):
-                lines.append(f'\tfprintf(fp, ", {f.name}=%zu items", this->{f.name}.size());')
+                lines.append(f'\toutput += std::format(", {f.name}={{}} items", this->{f.name}.size());')
             elif f.is_repeating and isinstance(f.repeat_count, int):
                 continue
             elif not f.is_repeating and f.pytype:
                 pt = f.pytype[:4]
-                fmt_prefix, fmt_macro = printf_format(pt)
-                if fmt_macro:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}" {fmt_macro}, this->{f.name});')
-                elif fmt_prefix:
-                    lines.append(f'\tfprintf(fp, ", {f.name}={fmt_prefix}", this->{f.name});')
-                elif is_array_type(f.pytype):
-                    lines.append(f'\tfprintf(fp, ", {f.name}=%zu bytes", sizeof(this->{f.name}));')
-    lines.append('\tfputs(")\\n", fp);')
+                if is_array_type(f.pytype):
+                    lines.append(f'\toutput += std::format(", {f.name}={{}} bytes", sizeof(this->{f.name}));')
+                elif pt.startswith("X"):
+                    width = X_HEX_WIDTH.get(pt, 2)
+                    lines.append(f'\toutput += std::format(", {f.name}=0x{{:0{width}x}}", +this->{f.name});')
+                else:
+                    lines.append(f'\toutput += std::format(", {f.name}={{}}", +this->{f.name});')
+    lines.append('\toutput += ")\\n";')
+    lines.append('\tfputs(output.c_str(), fp);')
     lines.append("}")
     lines.append("")
 
@@ -881,9 +791,8 @@ def write_parser_impl_file(class_name, msgs, ubx_payloads):
     lines = [HEADER]
     lines.append(f'#include "{fn}.hpp"')
     lines.append('#include "ubx_ids_gen.hpp"')
-    lines.append('#include <inttypes.h>')
     lines.append('#include <string>')
-    lines.append('#include <endian.h>')
+    lines.append('#include <format>')
     lines.append('#include <cstring>')
     lines.append("")
     lines.append("namespace UBX")
@@ -912,7 +821,7 @@ def write_dump_gen_header():
     lines.append("")
     lines.append("namespace UBX")
     lines.append("{")
-    lines.append("void ubx_dump_any(ubx_frame &frame, FILE *fp);")
+    lines.append("void ubx_dump_any(const ubx_frame &frame, FILE *fp);")
     lines.append("} // namespace UBX")
     lines.append("")
     lines.append("#endif // UBX_DUMP_GEN_HPP")
@@ -927,12 +836,11 @@ def write_dump_gen_impl(class_msgs, target_classes, ubx_payloads):
     for cls_name in target_classes:
         if cls_name in class_msgs:
             lines.append(f'#include "ubx_{cls_name.lower()}_gen.hpp"')
-    lines.append('#include "ubx_nav.hpp"')
     lines.append("")
     lines.append("namespace UBX")
     lines.append("{")
     lines.append("")
-    lines.append("void ubx_dump_any(ubx_frame &frame, FILE *fp)")
+    lines.append("void ubx_dump_any(const ubx_frame &frame, FILE *fp)")
     lines.append("{")
     lines.append("    if (!frame.valid)")
     lines.append("        return;")

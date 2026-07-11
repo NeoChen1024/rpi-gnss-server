@@ -13,15 +13,19 @@
 
 ```bash
 cd neoubxlogger
-make setup    # create .venv + install pyrtcm pynmeagps (one-time)
-make          # codegen + compile + link
+make setup    # create .venv + install codegen dependencies (optional preflight)
+make          # install missing codegen dependencies + generate + compile + link
 make gen      # regenerate parsers only
 make clean    # rm binary, .o, all *_gen.* files
 ```
 
-- C++11, `c++` compiler, `-pedantic -Wall -Wextra`.
+- C++20, `c++` compiler, `-pedantic -Wall -Wextra`.
 - `#DBG` (sanitizers) commented out in Makefile.
 - Generated files (`*_gen.*`) have `.gitignore` entries and are auto-rebuilt on `make`.
+- Scalar decoding uses `read_le<T>(std::span<const uint8_t>)`, `std::bit_cast`,
+  and `std::endian`; generated parsers must use these shared helpers.
+- Diagnostics and custom NAV dumps use `std::format`; parser diagnostics use
+  `std::source_location` through `report_parse_error()`.
 
 ### CLI flags
 
@@ -44,14 +48,17 @@ make clean    # rm binary, .o, all *_gen.* files
 - `ubx_{class}_gen.{hpp,cpp}` — parser classes (NAV, RXM, MON, TIM, ESF, HNR, LOG, SEC, CFG, ACK)
 - `ubx_dump_gen.{hpp,cpp}` — universal `UBX::ubx_dump_any(ubx_frame&, FILE*)`
 
-### Hand-written vs generated parsers
+### Generated parsers and NAV helpers
 
-`HAND_WRITTEN = {"NAV-PVT", "NAV-EOE"}` — these use hand-coded classes in `ubx_nav.{hpp,cpp}`.
+All supported message structs and parser classes, including NAV-PVT and NAV-EOE,
+are generated. `ubx_nav.{hpp,cpp}` contains only application-level free functions:
 
-- `ubx_nav_pvt` has `get_fix_type()` (returns "3D", "2D", etc.)
-- Both have custom `dump()` matching the generated single-line format.
-- Generated code skips HAND_WRITTEN messages (no struct, no parser, no id conflict).
-- `ubx_dump_gen.cpp` `#include`s `ubx_nav.hpp` for the two hand-written types.
+- NAV-PVT and NAV-EOE semantic validation
+- NAV-PVT fix-type formatting
+- custom NAV-PVT and NAV-EOE debug dumps
+
+Generated parser `valid` means that frame identity, payload length and structural
+decoding succeeded. Semantic validity is checked separately by the NAV helpers.
 
 ### TCP reader notes
 
@@ -61,10 +68,11 @@ TCP input (`-t`) uses raw `read()` syscalls (not FILE*) in `ubx_read_frame_tcp()
 
 Generated `.cpp` always includes: `ubx_{class}_gen.hpp`, `ubx_ids_gen.hpp`, `inttypes.h`, `string`, `endian.h`, `cstring`.
 
-### Hand-written include order
+### Include order
 
-`ubx.hpp` includes: `ubx_def.hpp`, `ubx_names.hpp`, `ubx_struct.hpp`, `ubx_nav.hpp`.
+`ubx.hpp` includes: `ubx_def.hpp`, `ubx_names.hpp`, `ubx_nav.hpp`.
 `ubx_def.hpp` includes `ubx_ids_gen.hpp`.
+`ubx_nav.hpp` includes `ubx_nav_gen.hpp`.
 
 ## Testing
 

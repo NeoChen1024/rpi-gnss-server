@@ -1,243 +1,106 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Kelei Chen
 
-#include "ubx.hpp"
 #include "ubx_nav.hpp"
-#include <string>
+
+#include "ubx_ids_gen.hpp"
+
+#include <format>
 
 namespace UBX
 {
-using std::string;
-ubx_nav_pvt::ubx_nav_pvt()
-{
-	clear();
-}
 
-ubx_nav_pvt::ubx_nav_pvt(ubx_frame &frame)
+bool ubx_nav_pvt_semantically_valid(const ubx_nav_pvt &pvt)
 {
-	parse(frame);
-}
+	if(!pvt.valid)
+		return false;
 
-void ubx_nav_pvt::clear()
-{
-	memset(&this->data, 0, sizeof(this->data));
-	this->valid = false;
-}
-
-bool ubx_nav_pvt::validate()
-{
-	// valid bitfield:
-	// bit 0: valid Date
-	// bit 1: valid Time
-	// bit 2: fully resolved
-	// bit 3: valid Mag
+	const _ubx_nav_pvt &data = pvt.data;
+	// UBX-NAV-PVT valid bits 0 and 1 indicate a valid date and time.
 	if((data.valid & 0x03) != 0x03)
-	{
 		return false;
-	}
 	if(data.month < 1 || data.month > 12)
-	{
 		return false;
-	}
 	if(data.day < 1 || data.day > 31)
-	{
 		return false;
-	}
-	if(data.hour > 23)
-	{
+	if(data.hour > 23 || data.min > 59)
 		return false;
-	}
-	if(data.min > 59)
-	{
-		return false;
-	}
-	// leap second is 60
-	if(data.sec > 60)
-	{
-		return false;
-	}
-	return true;
+	// A leap second may be represented as 60.
+	return data.second <= 60;
 }
 
-bool ubx_nav_pvt::parse(ubx_frame &frame)
+bool ubx_nav_eoe_semantically_valid(const ubx_nav_eoe &eoe)
 {
-	this->valid = false;
-	if(frame.valid == false)
-	{
-		return false;
-	}
-	if(frame.class_id != UBX_CLASS_NAV || frame.msg_id != UBX_NAV_PVT)
-	{
-		return false; // ignore non NAV-PVT frames
-	}
-	assert(sizeof(this->data) == UBX_NAV_PVT_SIZE);
-	if(frame.length != sizeof(this->data))
-	{
-		fprintf(stderr, "ubx_nav_pvt::ubx_nav_pvt(): frame.length = %d, sizeof(this->data) = %zd\n", frame.length, sizeof(this->data));
-		return false;
-	}
-	memcpy(&this->data, frame.payload.data(), sizeof(this->data));
-	// Endianness conversion
-	data.iTOW = le32toh(data.iTOW);
-	data.year = le16toh(data.year);
-	data.tAcc = le32toh(data.tAcc);
-	data.nano = le32toh(data.nano);
-	data.lon = le32toh(data.lon);
-	data.lat = le32toh(data.lat);
-	data.height = le32toh(data.height);
-	data.hMSL = le32toh(data.hMSL);
-	data.hAcc = le32toh(data.hAcc);
-	data.vAcc = le32toh(data.vAcc);
-	data.velN = le32toh(data.velN);
-	data.velE = le32toh(data.velE);
-	data.velD = le32toh(data.velD);
-	data.gSpeed = le32toh(data.gSpeed);
-	data.headMot = le32toh(data.headMot);
-	data.sAcc = le32toh(data.sAcc);
-	data.headAcc = le32toh(data.headAcc);
-	data.pDOP = le16toh(data.pDOP);
-	data.headVeh = le32toh(data.headVeh);
-	if(validate())
-	{
-		this->valid = true;
-		return true;
-	}
-	else
-	{
-		return false;
-	}
+	return eoe.valid && eoe.data.iTOW <= UINT32_C(86400) * 1000 * 7;
 }
 
-void ubx_nav_pvt::dump(FILE *fp)
+std::string ubx_nav_pvt_fix_type(const ubx_nav_pvt &pvt)
 {
-	fprintf(fp, "(NAV-PVT");
-	fprintf(fp, ", iTOW=%u", data.iTOW);
-	fprintf(fp, ", year=%u", data.year);
-	fprintf(fp, ", month=%hhu", data.month);
-	fprintf(fp, ", day=%hhu", data.day);
-	fprintf(fp, ", hour=%hhu", data.hour);
-	fprintf(fp, ", min=%hhu", data.min);
-	fprintf(fp, ", sec=%hhu", data.sec);
-	fprintf(fp, ", valid=%u", data.valid);
-	fprintf(fp, ", tAcc=%u", data.tAcc);
-	fprintf(fp, ", nano=%d", data.nano);
-	fprintf(fp, ", fixType=%hhu", data.fixType);
-	fprintf(fp, ", flags=%u", data.flags);
-	fprintf(fp, ", flags2=%u", data.flags2);
-	fprintf(fp, ", numSV=%hhu", data.numSV);
-	fprintf(fp, ", lon=%d", data.lon);
-	fprintf(fp, ", lat=%d", data.lat);
-	fprintf(fp, ", height=%d", data.height);
-	fprintf(fp, ", hMSL=%d", data.hMSL);
-	fprintf(fp, ", hAcc=%u", data.hAcc);
-	fprintf(fp, ", vAcc=%u", data.vAcc);
-	fprintf(fp, ", velN=%d", data.velN);
-	fprintf(fp, ", velE=%d", data.velE);
-	fprintf(fp, ", velD=%d", data.velD);
-	fprintf(fp, ", gSpeed=%d", data.gSpeed);
-	fprintf(fp, ", headMot=%d", data.headMot);
-	fprintf(fp, ", sAcc=%u", data.sAcc);
-	fprintf(fp, ", headAcc=%u", data.headAcc);
-	fprintf(fp, ", pDOP=%u", data.pDOP);
-	fprintf(fp, ", headVeh=%d", data.headVeh);
-	fputs(")\n", fp);
-}
-
-string ubx_nav_pvt::get_fix_type()
-{
-	// fixType & flags
-	string fix_type;
-	if(this->valid == false)
-	{
+	if(!ubx_nav_pvt_semantically_valid(pvt))
 		return "INVALID";
-	}
-	switch (data.fixType)
+
+	std::string fix_type;
+	switch(pvt.data.fixType)
 	{
-	case 0:
-		fix_type = "NO";
-		break;
-	case 1:
-		fix_type = "DR";
-		break;
-	case 2:
-		fix_type = "2D";
-		break;
-	case 3:
-		fix_type = "3D";
-		break;
-	case 4:
-		fix_type = "G+DR";
-		break;
-	case 5:
-		fix_type = "TIME";
-		break;
-	default:
-		fix_type = "?";
+	case 0: fix_type = "NO"; break;
+	case 1: fix_type = "DR"; break;
+	case 2: fix_type = "2D"; break;
+	case 3: fix_type = "3D"; break;
+	case 4: fix_type = "G+DR"; break;
+	case 5: fix_type = "TIME"; break;
+	default: fix_type = "?"; break;
 	}
-	if (data.flags & 0x02)
-	{
+	if(pvt.data.flags & 0x02)
 		fix_type += "/DGNSS";
-	}
 	return fix_type;
 }
 
-ubx_nav_eoe::ubx_nav_eoe()
+void ubx_nav_pvt_dump(const ubx_nav_pvt &pvt, FILE *fp)
 {
-	clear();
+	const _ubx_nav_pvt &data = pvt.data;
+	auto dump = std::format(
+		"(NAV-PVT, iTOW={}, year={}, month={}, day={}, hour={}, min={}, sec={}, valid={}, "
+		"tAcc={}, nano={}, fixType={}, flags={}, flags2={}, numSV={}, lon={}, lat={}, "
+		"height={}, hMSL={}, hAcc={}, vAcc={}, velN={}, velE={}, velD={}, gSpeed={}, "
+		"headMot={}, sAcc={}, headAcc={}, pDOP={}, headVeh={})\n",
+		data.iTOW, data.year, data.month, data.day, data.hour, data.min, data.second,
+		data.valid, data.tAcc, data.nano, data.fixType, data.flags, data.flags2,
+		data.numSV, data.lon, data.lat, data.height, data.hMSL, data.hAcc, data.vAcc,
+		data.velN, data.velE, data.velD, data.gSpeed, data.headMot, data.sAcc,
+		data.headAcc, data.pDOP, data.headVeh);
+	fputs(dump.c_str(), fp);
 }
 
-ubx_nav_eoe::ubx_nav_eoe(ubx_frame &frame)
+void ubx_nav_eoe_dump(const ubx_nav_eoe &eoe, FILE *fp)
 {
-	parse(frame);
+	auto dump = std::format("(NAV-EOE, iTOW={})\n", eoe.data.iTOW);
+	fputs(dump.c_str(), fp);
 }
 
-bool ubx_nav_eoe::parse(ubx_frame &frame)
+bool ubx_nav_dump_custom(const ubx_frame &frame, FILE *fp)
 {
-	this->valid = false;
-	if(frame.valid == false)
-	{
+	if(frame.class_id != UBX_CLASS_NAV)
 		return false;
-	}
-	if(frame.class_id != UBX_CLASS_NAV || frame.msg_id != UBX_NAV_EOE)
+
+	switch(frame.msg_id)
 	{
-		return false; // ignore non NAV-EOE frames
-	}
-	if(frame.length != 4)
+	case UBX_NAV_PVT:
 	{
-		return false;
-	}
-	this->iTOW = getu4(frame.payload, 0);
-	if(validate())
-	{
-		this->valid = true;
+		ubx_nav_pvt pvt(frame);
+		if(pvt.valid) ubx_nav_pvt_dump(pvt, fp);
+		else fputs("(NAV-PVT, invalid payload)\n", fp);
 		return true;
 	}
-	else
+	case UBX_NAV_EOE:
 	{
+		ubx_nav_eoe eoe(frame);
+		if(eoe.valid) ubx_nav_eoe_dump(eoe, fp);
+		else fputs("(NAV-EOE, invalid payload)\n", fp);
+		return true;
+	}
+	default:
 		return false;
 	}
-}
-
-void ubx_nav_eoe::clear()
-{
-	this->valid = false;
-	this->iTOW = 0;
-}
-
-bool ubx_nav_eoe::validate()
-{
-	if(this->iTOW > (86400 * 1000 * 7))
-	{
-		return false;
-	}
-	return true;
-}
-
-void ubx_nav_eoe::dump(FILE *fp)
-{
-	fprintf(fp, "(NAV-EOE");
-	fprintf(fp, ", iTOW=%u", this->iTOW);
-	fputs(")\n", fp);
 }
 
 } // namespace UBX

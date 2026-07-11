@@ -2,7 +2,7 @@ CXX	= c++
 OPT	= -O2 -pipe -fPIC -fPIE
 FLAGS	= $(OPT) -I. -Iinclude -g3 -pedantic -Wall -Wextra
 #DBG	= -fsanitize=undefined,integer,nullability -fno-omit-frame-pointer
-CXXFLAGS = $(FLAGS) $(DBG) -std=c++11 -MMD -MP
+CXXFLAGS = $(FLAGS) $(DBG) -std=c++20 -MMD -MP
 LDFLAGS	= -Wl,-O1 -Wl,--as-needed
 OBJS	= neoubxlogger.o ubx.o ubx_names.o ubx_nav.o
 GEN_CLASSES = nav rxm mon tim esf hnr log sec cfg ack
@@ -17,21 +17,26 @@ GEN_OBJS = ubx_nav_gen.o ubx_rxm_gen.o ubx_mon_gen.o ubx_tim_gen.o \
 DEPS	= $(OBJS:.o=.d) $(GEN_OBJS:.o=.d)
 PRGS	= neoubxlogger
 
-.PHONY: all clean countline gen regen setup
+.PHONY: all clean countline gen regen setup test
 
 all: $(PRGS)
 
 GEN_SCRIPT = ../scripts/generate_ubx_parsers.py
 GEN_STAMP  = .ubx_codegen.stamp
 PYTHON    = .venv/bin/python3
+PIP       = .venv/bin/pip
+PY_DEPS   = .venv/.codegen-deps.stamp
 PYUBX2_TYPES = ../3rdparty/pyubx2/src/pyubx2/ubxtypes_core.py \
                ../3rdparty/pyubx2/src/pyubx2/ubxtypes_get.py
 
-setup: .venv
-	.venv/bin/pip install pyrtcm pynmeagps
+setup: $(PY_DEPS)
 
 .venv:
 	python3 -m venv .venv
+
+$(PY_DEPS): requirements-codegen.txt | .venv
+	$(PIP) install -r $<
+	touch $@
 
 gen: $(GEN_STAMP)
 
@@ -39,7 +44,7 @@ regen:
 	rm -f $(GEN_STAMP)
 	$(MAKE) gen
 
-$(GEN_STAMP): $(GEN_SCRIPT) $(PYUBX2_TYPES) | .venv
+$(GEN_STAMP): $(GEN_SCRIPT) $(PYUBX2_TYPES) | $(PY_DEPS)
 	$(PYTHON) $(GEN_SCRIPT)
 	touch $@
 
@@ -57,9 +62,16 @@ neoubxlogger: $(OBJS) $(GEN_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^
 
 clean:
-	rm -f $(PRGS) $(OBJS) $(GEN_OBJS) $(DEPS) $(GEN_STAMP) *_gen.cpp *_gen.hpp
+	rm -f $(PRGS) $(OBJS) $(GEN_OBJS) $(DEPS) $(GEN_STAMP) tests/test_ubx *_gen.cpp *_gen.hpp
 
 countline:
 	wc -l *.h *.c
+
+tests/test_ubx: tests/test_ubx.cpp ubx.o ubx_names.o ubx_nav.o ubx_nav_gen.o
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+test: $(PRGS) tests/test_ubx
+	./tests/test_ubx
+	sh tests/smoke_reader.sh ./neoubxlogger
 
 -include $(DEPS)
