@@ -17,7 +17,7 @@ bool ubx_nav_pvt_semantically_valid(const ubx_nav_pvt &pvt)
 
 	const _ubx_nav_pvt &data = pvt.data;
 	// UBX-NAV-PVT valid bits 0 and 1 indicate a valid date and time.
-	if((data.valid & 0x03) != 0x03)
+	if((data.valid_bit & 0x03) != 0x03)
 		return false;
 	if(data.month < 1 || data.month > 12)
 		return false;
@@ -50,7 +50,7 @@ std::string ubx_nav_pvt_fix_type(const ubx_nav_pvt &pvt)
 	case 5: fix_type = "TIME"; break;
 	default: fix_type = "?"; break;
 	}
-	if(pvt.data.flags & 0x02)
+	if(pvt.data.flags_bit & 0x02)
 		fix_type += "/DGNSS";
 	return fix_type;
 }
@@ -64,7 +64,7 @@ void ubx_nav_pvt_dump(const ubx_nav_pvt &pvt, FILE *fp)
 		"height={}, hMSL={}, hAcc={}, vAcc={}, velN={}, velE={}, velD={}, gSpeed={}, "
 		"headMot={}, sAcc={}, headAcc={}, pDOP={}, headVeh={})\n",
 		data.iTOW, data.year, data.month, data.day, data.hour, data.min, data.second,
-		data.valid, data.tAcc, data.nano, data.fixType, data.flags, data.flags2,
+		data.valid_bit, data.tAcc, data.nano, data.fixType, data.flags_bit, data.flags2_bit,
 		data.numSV, data.lon, data.lat, data.height, data.hMSL, data.hAcc, data.vAcc,
 		data.velN, data.velE, data.velD, data.gSpeed, data.headMot, data.sAcc,
 		data.headAcc, data.pDOP, data.headVeh);

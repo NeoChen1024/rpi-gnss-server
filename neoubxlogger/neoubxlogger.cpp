@@ -22,6 +22,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <charconv>
 #include <ctime>
 #include <format>
 
@@ -34,6 +35,7 @@ enum class ReadResult
 {
 	ok,
 	end,
+	truncated,
 	timeout,
 	error,
 };
@@ -79,7 +81,9 @@ static ReadResult read_ubx_frame(void *context, read_byte_fn read_byte, ubx_buf_
 	while(true)
 	{
 		auto read_result = read_byte(context);
-		if(read_result.result != ReadResult::ok) return read_result.result;
+		if(read_result.result != ReadResult::ok)
+			return read_result.result == ReadResult::end && have_sync1
+				? ReadResult::truncated : read_result.result;
 		uint8_t c = read_result.byte;
 		if(!have_sync1)
 		{
@@ -103,7 +107,9 @@ static ReadResult read_ubx_frame(void *context, read_byte_fn read_byte, ubx_buf_
 	for(size_t i = 0; i < UBX_HEADER_SIZE; i++)
 	{
 		auto read_result = read_byte(context);
-		if(read_result.result != ReadResult::ok) return read_result.result;
+		if(read_result.result != ReadResult::ok)
+			return read_result.result == ReadResult::end
+				? ReadResult::truncated : read_result.result;
 		buf.push_back(read_result.byte);
 	}
 
@@ -112,7 +118,9 @@ static ReadResult read_ubx_frame(void *context, read_byte_fn read_byte, ubx_buf_
 	for(size_t i = 0; i < length + UBX_CKSUM_SIZE; i++)
 	{
 		auto read_result = read_byte(context);
-		if(read_result.result != ReadResult::ok) return read_result.result;
+		if(read_result.result != ReadResult::ok)
+			return read_result.result == ReadResult::end
+				? ReadResult::truncated : read_result.result;
 		buf.push_back(read_result.byte);
 	}
 	return ReadResult::ok;
@@ -206,13 +214,46 @@ static void print_stats(Stats &st, time_t now)
 	st.period_fix = 0;
 }
 
+// Own the output stream so early failures also close it. Success paths must
+// explicitly check close(): buffered write errors may only surface at fclose().
+class OutputFile
+{
+public:
+	OutputFile() = default;
+	OutputFile(const OutputFile &) = delete;
+	OutputFile &operator=(const OutputFile &) = delete;
+	~OutputFile() { close(); }
+	FILE *get() const { return fp; }
+	bool close()
+	{
+		FILE *closing = fp;
+		fp = nullptr;
+		if(closing && fclose(closing) == EOF)
+		{
+			perror("UBX output close");
+			return false;
+		}
+		return true;
+	}
+	bool open(const char *filename)
+	{
+		if(!close()) return false;
+		fp = fopen(filename, "wb");
+		if(!fp) perror(filename);
+		return fp != nullptr;
+	}
+private:
+	FILE *fp = nullptr;
+};
+
 int main(int argc, char *argv[])
 {
 	bool debug = false;
 	bool no_write = false;
 	bool quiet = false;
 	FILE *readin = stdin;
-	FILE *writeout = NULL;
+	OutputFile output;
+	const char *input_path = nullptr;
 
 	bool tcp_mode = false;
 	std::string tcp_host;
@@ -230,12 +271,7 @@ int main(int argc, char *argv[])
 		switch(opt)
 		{
 		case 'f':
-			readin = fopen(optarg, "rb");
-			if(readin == NULL)
-			{
-				perror(optarg);
-				RETURN_ERR;
-			}
+			input_path = optarg;
 			break;
 		case 't':
 		{
@@ -247,7 +283,23 @@ int main(int argc, char *argv[])
 				RETURN_ERR;
 			}
 			tcp_host = spec.substr(0, colon);
-			tcp_port = std::stoi(spec.substr(colon + 1));
+			const char *port_begin = spec.data() + colon + 1;
+			const char *port_end = spec.data() + spec.size();
+			auto [end, error] = std::from_chars(port_begin, port_end, tcp_port);
+			if(error != std::errc{} || end != port_end || tcp_port < 1 || tcp_port > 65535)
+			{
+				fprintf(stderr, "Invalid TCP port in '%s'. Expected 1..65535\n", optarg);
+				RETURN_ERR;
+			}
+			if(tcp_host.front() == '[')
+			{
+				if(tcp_host.size() <= 2 || tcp_host.back() != ']')
+				{
+					fprintf(stderr, "Invalid TCP spec '%s'. Expected HOST:PORT\n", optarg);
+					RETURN_ERR;
+				}
+				tcp_host = tcp_host.substr(1, tcp_host.size() - 2);
+			}
 			tcp_mode = true;
 			break;
 		}
@@ -266,7 +318,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if(tcp_mode && readin != stdin)
+	if(tcp_mode && input_path != nullptr)
 	{
 		fprintf(stderr, "-f and -t are mutually exclusive\n");
 		RETURN_ERR;
@@ -275,6 +327,16 @@ int main(int argc, char *argv[])
 	{
 		fprintf(stderr, "-d and -q are mutually exclusive\n");
 		RETURN_ERR;
+	}
+	if(optind != argc)
+	{
+		fprintf(stderr, "Unexpected argument: %s\n", argv[optind]);
+		RETURN_ERR;
+	}
+	if(input_path)
+	{
+		readin = fopen(input_path, "rb");
+		if(!readin) { perror(input_path); RETURN_ERR; }
 	}
 	if(tcp_mode)
 	{
@@ -298,7 +360,11 @@ int main(int argc, char *argv[])
 		{
 			ReadResult ret = read_ubx_frame(&sockfd, tcp_read_byte, buf);
 			if(ret == ReadResult::timeout)
+			{
+				fprintf(stderr, "\nTCP %s:%d: read timeout; discarding partial frame and resynchronizing\n",
+					tcp_host.c_str(), tcp_port);
 				continue;
+			}
 			if(ret != ReadResult::ok)
 			{
 				if(ret == ReadResult::error) perror("TCP read");
@@ -319,6 +385,11 @@ int main(int argc, char *argv[])
 		{
 			ReadResult ret = read_ubx_frame(readin, file_read_byte, buf);
 			if(ret == ReadResult::end) break;
+			if(ret == ReadResult::truncated)
+			{
+				fputs("Truncated UBX frame at EOF\n", stderr);
+				RETURN_ERR;
+			}
 			if(ret != ReadResult::ok)
 			{
 				perror("UBX input");
@@ -334,12 +405,6 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
-		if(writeout != NULL && frame.write(writeout) == EOF)
-		{
-			perror("UBX output");
-			RETURN_ERR;
-		}
-
 		if(debug && !ubx_nav_dump_custom(frame, stderr))
 			ubx_dump_any(frame, stderr);
 
@@ -347,9 +412,37 @@ int main(int argc, char *argv[])
 		if(ubx_nav_pvt_semantically_valid(pvt))
 		{
 			stats.period_pvt++;
-			if(pvt.data.fixType >= 2) stats.period_fix++;
+			if((pvt.data.flags_bit & 1) && pvt.data.fixType >= 2 && pvt.data.fixType <= 4)
+				stats.period_fix++;
 			current_pvt = pvt;
 			if(!quiet) print_status_line(pvt);
+			if((output.get() == nullptr ||
+				current_pvt.data.year != last_pvt.data.year ||
+				current_pvt.data.month != last_pvt.data.month ||
+				current_pvt.data.day != last_pvt.data.day) && !no_write)
+			{
+				if(!output.close()) RETURN_ERR;
+				char dirname[64];
+				snprintf(dirname, sizeof(dirname), "%04u-%02hhu",
+					current_pvt.data.year, current_pvt.data.month);
+				if(mkdir(dirname, 0755) != 0 && errno != EEXIST)
+				{
+					perror(dirname);
+					RETURN_ERR;
+				}
+				char filename[128];
+				snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
+					dirname,
+					current_pvt.data.year, current_pvt.data.month, current_pvt.data.day, current_pvt.data.hour, current_pvt.data.min, current_pvt.data.second);
+				if(!output.open(filename))
+				{
+					fprintf(stderr, "Unable to open file %s!\n", filename);
+					RETURN_ERR;
+				}
+				if(!quiet)
+					fprintf(stderr, "\nOpened file %s\n", filename);
+			}
+			last_pvt = current_pvt;
 		}
 
 		ubx_nav_eoe eoe(frame);
@@ -367,35 +460,13 @@ int main(int argc, char *argv[])
 				}
 
 				if(!quiet) fputs(" EOE", stderr);
-
-				if((writeout == NULL || current_pvt.data.day != last_pvt.data.day) && !no_write)
-				{
-					if(writeout != NULL)
-						fclose(writeout);
-					char dirname[64];
-					snprintf(dirname, sizeof(dirname), "%04u-%02hhu",
-						current_pvt.data.year, current_pvt.data.month);
-					if(mkdir(dirname, 0755) != 0 && errno != EEXIST)
-					{
-						perror(dirname);
-						RETURN_ERR;
-					}
-					char filename[128];
-					snprintf(filename, 128, "%s/%04u%02hhu%02hhuT%02hhu%02hhu%02hhu.ubx",
-						dirname,
-						current_pvt.data.year, current_pvt.data.month, current_pvt.data.day, current_pvt.data.hour, current_pvt.data.min, current_pvt.data.second);
-					writeout = fopen(filename, "wb");
-					if(writeout == NULL)
-					{
-						fprintf(stderr, "Unable to open file %s!\n", filename);
-						RETURN_ERR;
-					}
-					if(!quiet)
-						fprintf(stderr, "\nOpened file %s\n", filename);
-				}
-
-				last_pvt = current_pvt;
 			}
+		}
+
+		if(output.get() && frame.write(output.get()) == EOF)
+		{
+			perror("UBX output");
+			RETURN_ERR;
 		}
 
 		stats.period_bytes += 8 + frame.length;
@@ -409,6 +480,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if(!output.close()) RETURN_ERR;
+	if(readin != stdin) fclose(readin);
 	if(!quiet)
 		fputs("\nEOF!?\n", stderr);
 	return 0;

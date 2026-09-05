@@ -155,7 +155,7 @@ bool ubx_any_msg::parse(const ubx_frame &frame)
 void ubx_any_msg::dump(FILE *fp) const
 {
 	fprintf(fp, "%s (%zd)\t> ",
-		("UBX-" + ubx_msg_name(this->class_id, this->msg_id)).c_str(),
+		("UBX-" + ubx_msg_name(this->class_id, this->msg_id, this->payload)).c_str(),
 		this->payload.size());
 	for(auto i: this->payload)
 	{
